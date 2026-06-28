@@ -1,8 +1,9 @@
 import subprocess, json, time, re, os
+from typing import Optional
 
 import psutil
 import cpuinfo
-from fastapi import FastAPI
+from fastapi import FastAPI, Body
 from fastapi.staticfiles import StaticFiles
 
 app = FastAPI()
@@ -398,6 +399,82 @@ def api_live():
 @app.get("/api/raid")
 def api_raid():
     return _parse_mdstat()
+
+
+# ──────────────────────────────────────────────────────────── NETMAP ──
+
+NETMAP_DATA = "/app/netmap_devices.json"
+NETMAP_RANGE = "192.168.1.10-150"
+
+
+def _netmap_load() -> dict:
+    try:
+        with open(NETMAP_DATA) as f:
+            return json.load(f)
+    except Exception:
+        return {}
+
+
+def _netmap_save(data: dict):
+    with open(NETMAP_DATA, "w") as f:
+        json.dump(data, f, indent=2)
+
+
+def _netmap_parse(output: str) -> list[dict]:
+    hosts = []
+    current: dict = {}
+    for line in output.splitlines():
+        m_host = re.search(r"Nmap scan report for (.+)", line)
+        if m_host:
+            if current.get("ip"):
+                hosts.append(current)
+            raw = m_host.group(1)
+            ip_m = re.search(r"\((\d+\.\d+\.\d+\.\d+)\)", raw)
+            if ip_m:
+                current = {"ip": ip_m.group(1), "hostname": raw.split("(")[0].strip(), "mac": "", "vendor": ""}
+            else:
+                current = {"ip": raw.strip(), "hostname": "", "mac": "", "vendor": ""}
+            continue
+        m_mac = re.search(r"MAC Address: ([0-9A-F:]+)\s*(?:\((.+)\))?", line, re.I)
+        if m_mac:
+            current["mac"] = m_mac.group(1)
+            current["vendor"] = m_mac.group(2) or ""
+    if current.get("ip"):
+        hosts.append(current)
+    return hosts
+
+
+@app.get("/api/netmap/scan")
+def api_netmap_scan():
+    try:
+        r = subprocess.run(
+            ["nmap", "-sn", "-T4", "--host-timeout", "2s", NETMAP_RANGE],
+            capture_output=True, text=True, timeout=120
+        )
+        hosts = _netmap_parse(r.stdout)
+        return {"hosts": hosts, "names": _netmap_load()}
+    except Exception as e:
+        return {"hosts": [], "names": {}, "error": str(e)}
+
+
+@app.get("/api/netmap/names")
+def api_netmap_names():
+    return _netmap_load()
+
+
+@app.post("/api/netmap/name")
+def api_netmap_name(payload: dict = Body(...)):
+    ip = payload.get("ip", "").strip()
+    name = payload.get("name", "").strip()
+    if not re.match(r"^\d+\.\d+\.\d+\.\d+$", ip):
+        return {"ok": False, "error": "IP invalide"}
+    data = _netmap_load()
+    if name:
+        data[ip] = name
+    elif ip in data:
+        del data[ip]
+    _netmap_save(data)
+    return {"ok": True}
 
 
 app.mount("/", StaticFiles(directory="/app/static", html=True), name="static")

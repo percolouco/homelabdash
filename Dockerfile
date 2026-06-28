@@ -4,6 +4,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     smartmontools \
     dmidecode \
     lsb-release \
+    nmap \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app

@@ -10,6 +10,7 @@ services:
       - /sys:/sys:ro
       - /dev:/dev
       - /run/udev:/run/udev:ro
+      - /home/perco/projects/homelabdash/netmap_devices.json:/app/netmap_devices.json
     environment:
       - HOST_ROOT=/rootfs
       - TZ=Europe/Paris
