@@ -1,0 +1,21 @@
+services:
+  homelabdash:
+    build: .
+    container_name: homelabdash
+    restart: unless-stopped
+    privileged: true
+    network_mode: host
+    volumes:
+      - /:/rootfs:ro,rslave
+      - /sys:/sys:ro
+      - /dev:/dev
+      - /run/udev:/run/udev:ro
+    environment:
+      - HOST_ROOT=/rootfs
+      - TZ=Europe/Paris
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.homelabdash.rule=Host(`homelabdash.nas.percolouco.com`)"
+      - "traefik.http.routers.homelabdash.entrypoints=websecure"
+      - "traefik.http.routers.homelabdash.tls.certresolver=letsencrypt"
+      - "traefik.http.services.homelabdash.loadbalancer.server.url=http://192.168.1.29:8000"

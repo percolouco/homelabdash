@@ -1,0 +1,431 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>HomeLab Dashboard</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
+<style>
+  :root {
+    --bg: #0d1117;
+    --card: #161b22;
+    --border: #30363d;
+    --text: #e6edf3;
+    --muted: #8b949e;
+    --accent: #58a6ff;
+    --green: #3fb950;
+    --yellow: #d29922;
+    --red: #f85149;
+    --purple: #bc8cff;
+    --teal: #39d353;
+    --orange: #f0883e;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: var(--bg); color: var(--text); font-family: 'Segoe UI', system-ui, sans-serif; font-size: 14px; min-height: 100vh; }
+
+  header {
+    display: flex; align-items: center; gap: 16px;
+    padding: 16px 24px;
+    background: var(--card);
+    border-bottom: 1px solid var(--border);
+    position: sticky; top: 0; z-index: 10;
+  }
+  header h1 { font-size: 18px; font-weight: 600; letter-spacing: .5px; color: var(--accent); }
+  .header-meta { margin-left: auto; display: flex; gap: 20px; align-items: center; }
+  .badge { padding: 3px 10px; border-radius: 12px; font-size: 12px; font-weight: 600; }
+  .badge-ok { background: #1f4024; color: var(--green); border: 1px solid #2d5a31; }
+  .badge-warn { background: #3b2a1a; color: var(--yellow); border: 1px solid #5a3e1a; }
+  .badge-err { background: #3b1219; color: var(--red); border: 1px solid #5a1a22; }
+  #uptime-label { color: var(--muted); font-size: 13px; }
+  #refresh-dot { width:8px;height:8px;border-radius:50%;background:var(--green);display:inline-block;margin-right:4px; }
+
+  main { padding: 20px 24px; display: grid; gap: 16px; grid-template-columns: repeat(auto-fill, minmax(340px, 1fr)); }
+
+  .card {
+    background: var(--card); border: 1px solid var(--border); border-radius: 10px;
+    padding: 16px; display: flex; flex-direction: column; gap: 10px;
+  }
+  .card.wide { grid-column: 1 / -1; }
+  .card.two { grid-column: span 2; }
+
+  .card-title { font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: 1px; color: var(--muted); display: flex; align-items: center; gap: 8px; }
+  .card-title .icon { font-size: 16px; }
+
+  .info-row { display: flex; justify-content: space-between; align-items: baseline; border-bottom: 1px solid #21262d; padding: 5px 0; }
+  .info-row:last-child { border-bottom: none; }
+  .info-key { color: var(--muted); }
+  .info-val { font-weight: 600; color: var(--text); text-align: right; max-width: 60%; word-break: break-all; }
+
+  .meter-wrap { display: flex; flex-direction: column; gap: 4px; }
+  .meter-label { display: flex; justify-content: space-between; font-size: 12px; }
+  .meter-bar { height: 8px; background: #21262d; border-radius: 4px; overflow: hidden; }
+  .meter-fill { height: 100%; border-radius: 4px; transition: width .5s; }
+  .fill-green { background: var(--green); }
+  .fill-yellow { background: var(--yellow); }
+  .fill-red { background: var(--red); }
+  .fill-blue { background: var(--accent); }
+  .fill-purple { background: var(--purple); }
+
+  .chart-wrap { position: relative; height: 140px; }
+
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th { text-align: left; padding: 6px 8px; color: var(--muted); font-weight: 600; border-bottom: 1px solid var(--border); font-size: 11px; text-transform: uppercase; }
+  td { padding: 7px 8px; border-bottom: 1px solid #21262d; vertical-align: middle; }
+  tr:last-child td { border-bottom: none; }
+  tr:hover td { background: #1c2128; }
+
+  .smart-ok { color: var(--green); font-weight: 700; }
+  .smart-fail { color: var(--red); font-weight: 700; }
+  .smart-unk { color: var(--muted); }
+
+  .core-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(90px, 1fr)); gap: 6px; }
+  .core-item { background: #21262d; border-radius: 6px; padding: 6px 8px; }
+  .core-item .core-name { font-size: 10px; color: var(--muted); margin-bottom: 3px; }
+  .core-item .core-val { font-weight: 700; font-size: 13px; }
+
+  .net-stats { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  .net-stat { background: #21262d; border-radius: 8px; padding: 12px; text-align: center; }
+  .net-stat .ns-label { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing:.5px; margin-bottom: 4px; }
+  .net-stat .ns-val { font-size: 22px; font-weight: 700; }
+  .net-stat .ns-unit { font-size: 11px; color: var(--muted); }
+  .dl-color { color: var(--teal); }
+  .ul-color { color: var(--orange); }
+
+  .stick-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 8px; }
+  .stick { background: #21262d; border-radius: 8px; padding: 10px 12px; display: flex; flex-direction: column; gap: 4px; }
+  .stick .s-slot { font-size: 10px; color: var(--muted); font-weight: 700; text-transform: uppercase; }
+  .stick .s-size { font-size: 18px; font-weight: 800; color: var(--accent); }
+  .stick .s-info { font-size: 11px; color: var(--muted); }
+
+  #loading { text-align: center; padding: 60px; color: var(--muted); font-size: 16px; grid-column: 1 / -1; }
+</style>
+</head>
+<body>
+<header>
+  <span style="font-size:24px">🖥️</span>
+  <div>
+    <h1 id="hostname">HomeLab Dashboard</h1>
+    <div style="font-size:12px;color:var(--muted)" id="os-line">Chargement…</div>
+  </div>
+  <div class="header-meta">
+    <span id="uptime-label">–</span>
+    <span><span id="refresh-dot"></span><span style="font-size:12px;color:var(--muted)">live</span></span>
+  </div>
+</header>
+<main id="main"><div id="loading">⏳ Chargement des données…</div></main>
+
+<script>
+const HIST_LEN = 40;
+const hist = {
+  cpu: [], net_dl: [], net_ul: [], mem: []
+};
+let cpuChart, netChart;
+let hwLoaded = false;
+
+function fmt_bytes(b, dec=1) {
+  if (b == null) return '–';
+  if (b === 0) return '0 B';
+  const sizes = ['B','KB','MB','GB','TB'];
+  const i = Math.floor(Math.log(Math.abs(b)) / Math.log(1024));
+  return (b / Math.pow(1024, i)).toFixed(dec) + ' ' + sizes[i];
+}
+function fmt_bps(bps) {
+  if (bps < 1024) return bps.toFixed(0) + ' B/s';
+  if (bps < 1048576) return (bps/1024).toFixed(1) + ' KB/s';
+  return (bps/1048576).toFixed(2) + ' MB/s';
+}
+function fmt_uptime(s) {
+  const d = Math.floor(s/86400), h = Math.floor((s%86400)/3600), m = Math.floor((s%3600)/60);
+  const parts = [];
+  if (d) parts.push(d+'j');
+  if (h) parts.push(h+'h');
+  parts.push(m+'m');
+  return parts.join(' ');
+}
+function fill_color(pct) {
+  if (pct > 85) return 'fill-red';
+  if (pct > 60) return 'fill-yellow';
+  return 'fill-green';
+}
+function meter(label, pct, detail='') {
+  const cls = fill_color(pct);
+  return `<div class="meter-wrap">
+    <div class="meter-label"><span>${label}</span><span><b>${pct.toFixed(1)}%</b>${detail ? ' · '+detail : ''}</span></div>
+    <div class="meter-bar"><div class="meter-fill ${cls}" style="width:${pct}%"></div></div>
+  </div>`;
+}
+function info_row(k, v) {
+  return `<div class="info-row"><span class="info-key">${k}</span><span class="info-val">${v ?? '–'}</span></div>`;
+}
+function push_hist(arr, val) {
+  arr.push(val);
+  if (arr.length > HIST_LEN) arr.shift();
+}
+
+function build_ui(os, hw) {
+  const main = document.getElementById('main');
+  main.innerHTML = `
+    <!-- OS + Board -->
+    <div class="card" id="card-os">
+      <div class="card-title"><span class="icon">🐧</span> Système</div>
+      ${info_row('Hostname', os.hostname)}
+      ${info_row('OS', os.os)}
+      ${info_row('Kernel', os.kernel)}
+      ${info_row('Architecture', os.arch)}
+      ${info_row('Carte mère', [hw.board.manufacturer, hw.board.product].filter(Boolean).join(' · '))}
+    </div>
+
+    <!-- CPU info -->
+    <div class="card" id="card-cpu-info">
+      <div class="card-title"><span class="icon">⚡</span> Processeur</div>
+      ${info_row('Modèle', hw.cpu.brand)}
+      ${info_row('Architecture', hw.cpu.arch)}
+      ${info_row('Fréquence annoncée', hw.cpu.hz_advertised)}
+      ${info_row('Cœurs physiques', hw.cpu.cores_physical)}
+      ${info_row('Threads logiques', hw.cpu.cores_logical)}
+      <div id="cpu-live-rows"></div>
+    </div>
+
+    <!-- CPU usage graph -->
+    <div class="card" id="card-cpu-graph">
+      <div class="card-title"><span class="icon">📈</span> Utilisation CPU</div>
+      <div id="cpu-meter-wrap"></div>
+      <div class="chart-wrap"><canvas id="chart-cpu"></canvas></div>
+      <div class="core-grid" id="core-grid"></div>
+    </div>
+
+    <!-- RAM hardware -->
+    <div class="card" id="card-ram-hw">
+      <div class="card-title"><span class="icon">🧩</span> Mémoire — hardware</div>
+      <div class="stick-grid" id="stick-grid">
+        ${hw.memory_sticks.length ? hw.memory_sticks.map(s => `
+          <div class="stick">
+            <div class="s-slot">${s.locator}</div>
+            <div class="s-size">${s.size}</div>
+            <div class="s-info">${s.type}${s.speed ? ' · ' + s.speed : ''}</div>
+            <div class="s-info">${s.manufacturer !== 'Unknown' ? s.manufacturer : ''}${s.part_number !== 'Unknown' ? ' · ' + s.part_number : ''}</div>
+          </div>`) .join('') : '<span style="color:var(--muted)">dmidecode indisponible</span>'}
+      </div>
+    </div>
+
+    <!-- RAM usage -->
+    <div class="card" id="card-ram-usage">
+      <div class="card-title"><span class="icon">💾</span> Utilisation mémoire</div>
+      <div id="ram-meters"></div>
+      <div class="chart-wrap"><canvas id="chart-mem"></canvas></div>
+    </div>
+
+    <!-- Network graph -->
+    <div class="card two" id="card-net">
+      <div class="card-title"><span class="icon">🌐</span> Réseau</div>
+      <div class="net-stats">
+        <div class="net-stat"><div class="ns-label">⬇ Download</div><div class="ns-val dl-color" id="net-dl">–</div><div class="ns-unit" id="net-dl-tot"></div></div>
+        <div class="net-stat"><div class="ns-label">⬆ Upload</div><div class="ns-val ul-color" id="net-ul">–</div><div class="ns-unit" id="net-ul-tot"></div></div>
+      </div>
+      <div class="chart-wrap" style="height:160px"><canvas id="chart-net"></canvas></div>
+      <div id="net-ifaces" style="margin-top:4px"></div>
+    </div>
+
+    <!-- Disques partitions -->
+    <div class="card wide" id="card-disks">
+      <div class="card-title"><span class="icon">💿</span> Espace disque</div>
+      <div id="disk-meters"></div>
+    </div>
+
+    <!-- SMART -->
+    <div class="card wide" id="card-smart">
+      <div class="card-title"><span class="icon">🔍</span> S.M.A.R.T — état des disques</div>
+      ${Object.keys(hw.smart).length ? `
+      <table>
+        <thead><tr><th>Périphérique</th><th>Modèle</th><th>Série</th><th>Capacité</th><th>Santé</th><th>Température</th></tr></thead>
+        <tbody id="smart-tbody">
+          ${Object.entries(hw.smart).map(([dev, s]) => `
+          <tr>
+            <td><code>${s.device}</code></td>
+            <td>${s.model || '–'}</td>
+            <td>${s.serial || '–'}</td>
+            <td>${fmt_bytes(s.capacity_bytes)}</td>
+            <td class="${s.health === true ? 'smart-ok' : s.health === false ? 'smart-fail' : 'smart-unk'}">${s.health === true ? '✅ PASSED' : s.health === false ? '❌ FAILED' : '❓ –'}</td>
+            <td>${s.temp_c != null ? s.temp_c + ' °C' : '–'}</td>
+          </tr>`).join('')}
+        </tbody>
+      </table>` : '<span style="color:var(--muted)">smartctl indisponible ou aucun disque SMART détecté</span>'}
+    </div>
+
+    <!-- Températures -->
+    <div class="card" id="card-temps">
+      <div class="card-title"><span class="icon">🌡️</span> Températures</div>
+      <div id="temp-table"></div>
+    </div>
+  `;
+
+  // init charts
+  const chartOpts = (label, color1, color2) => ({
+    type: 'line',
+    data: { labels: Array(HIST_LEN).fill(''), datasets: [{
+      label: label, data: Array(HIST_LEN).fill(null),
+      borderColor: color1, backgroundColor: color1 + '22',
+      fill: true, tension: 0.4, pointRadius: 0, borderWidth: 2
+    }] },
+    options: {
+      animation: false, responsive: true, maintainAspectRatio: false,
+      plugins: { legend: { display: false } },
+      scales: {
+        x: { display: false },
+        y: { min: 0, max: 100, grid: { color: '#21262d' }, ticks: { color: '#8b949e', font: { size: 10 } } }
+      }
+    }
+  });
+
+  cpuChart = new Chart(document.getElementById('chart-cpu').getContext('2d'), chartOpts('CPU %', '#58a6ff'));
+
+  const memCtx = document.getElementById('chart-mem').getContext('2d');
+  window._memChart = new Chart(memCtx, {
+    type: 'line',
+    data: { labels: Array(HIST_LEN).fill(''), datasets: [{
+      label: 'RAM %', data: Array(HIST_LEN).fill(null),
+      borderColor: '#bc8cff', backgroundColor: '#bc8cff22',
+      fill: true, tension: 0.4, pointRadius: 0, borderWidth: 2
+    }] },
+    options: { animation: false, responsive: true, maintainAspectRatio: false,
+      plugins: { legend: { display: false } },
+      scales: { x: { display: false }, y: { min: 0, max: 100, grid: { color: '#21262d' }, ticks: { color: '#8b949e', font: { size: 10 } } } }
+    }
+  });
+
+  const netCtx = document.getElementById('chart-net').getContext('2d');
+  window._netChart = new Chart(netCtx, {
+    type: 'line',
+    data: {
+      labels: Array(HIST_LEN).fill(''),
+      datasets: [
+        { label: '⬇ DL', data: Array(HIST_LEN).fill(null), borderColor: '#39d353', backgroundColor: '#39d35322', fill: true, tension: 0.4, pointRadius: 0, borderWidth: 2 },
+        { label: '⬆ UL', data: Array(HIST_LEN).fill(null), borderColor: '#f0883e', backgroundColor: '#f0883e22', fill: true, tension: 0.4, pointRadius: 0, borderWidth: 2 },
+      ]
+    },
+    options: {
+      animation: false, responsive: true, maintainAspectRatio: false,
+      plugins: { legend: { display: true, labels: { color: '#8b949e', boxWidth: 12, font: { size: 11 } } } },
+      scales: { x: { display: false }, y: { min: 0, grid: { color: '#21262d' }, ticks: { color: '#8b949e', font: { size: 10 }, callback: v => fmt_bps(v) } } }
+    }
+  });
+}
+
+function update_live(live) {
+  // uptime
+  document.getElementById('uptime-label').textContent = '⏱ ' + fmt_uptime(live.uptime_s);
+
+  // CPU
+  push_hist(hist.cpu, live.cpu.percent);
+  document.getElementById('cpu-live-rows').innerHTML =
+    info_row('Fréquence actuelle', live.cpu.freq_mhz ? live.cpu.freq_mhz + ' MHz' : '–') +
+    info_row('Fréquence max', live.cpu.freq_max_mhz ? live.cpu.freq_max_mhz + ' MHz' : '–');
+
+  document.getElementById('cpu-meter-wrap').innerHTML = meter('Utilisation globale', live.cpu.percent);
+
+  if (cpuChart) {
+    cpuChart.data.datasets[0].data = [...hist.cpu, ...Array(HIST_LEN - hist.cpu.length).fill(null)].slice(-HIST_LEN);
+    cpuChart.update('none');
+  }
+
+  // cœurs
+  const cores = live.cpu.percent_per_core || [];
+  document.getElementById('core-grid').innerHTML = cores.map((p, i) =>
+    `<div class="core-item"><div class="core-name">CPU ${i}</div><div class="core-val" style="color:${p>80?'var(--red)':p>50?'var(--yellow)':'var(--green)'}">${p.toFixed(1)}%</div><div class="meter-bar" style="margin-top:3px"><div class="meter-fill ${fill_color(p)}" style="width:${p}%"></div></div></div>`
+  ).join('');
+
+  // RAM
+  const m = live.memory;
+  push_hist(hist.mem, m.percent);
+  const cached = m.cached + m.buffers;
+  document.getElementById('ram-meters').innerHTML =
+    meter('Utilisée', m.percent, fmt_bytes(m.used) + ' / ' + fmt_bytes(m.total)) +
+    (cached > 0 ? `<div style="margin-top:6px">${meter('Cache + buffers', (cached/m.total*100), fmt_bytes(cached))}</div>` : '') +
+    (live.swap.total > 0 ? `<div style="margin-top:6px">${meter('Swap', live.swap.percent, fmt_bytes(live.swap.used) + ' / ' + fmt_bytes(live.swap.total))}</div>` : '');
+
+  if (window._memChart) {
+    window._memChart.data.datasets[0].data = [...hist.mem, ...Array(HIST_LEN - hist.mem.length).fill(null)].slice(-HIST_LEN);
+    window._memChart.update('none');
+  }
+
+  // Réseau
+  push_hist(hist.net_dl, live.network.dl_bps);
+  push_hist(hist.net_ul, live.network.ul_bps);
+  document.getElementById('net-dl').textContent = fmt_bps(live.network.dl_bps);
+  document.getElementById('net-ul').textContent = fmt_bps(live.network.ul_bps);
+  document.getElementById('net-dl-tot').textContent = 'Total reçu : ' + fmt_bytes(live.network.total_recv);
+  document.getElementById('net-ul-tot').textContent = 'Total envoyé : ' + fmt_bytes(live.network.total_sent);
+
+  const ifaces = live.network.interfaces || {};
+  document.getElementById('net-ifaces').innerHTML = Object.entries(ifaces).map(([iface, ip]) =>
+    `<span style="margin-right:16px;font-size:12px;color:var(--muted)"><code style="color:var(--accent)">${iface}</code> ${ip}</span>`
+  ).join('');
+
+  if (window._netChart) {
+    const pad = (arr) => [...Array(HIST_LEN - arr.length).fill(null), ...arr].slice(-HIST_LEN);
+    window._netChart.data.datasets[0].data = pad(hist.net_dl);
+    window._netChart.data.datasets[1].data = pad(hist.net_ul);
+    const maxVal = Math.max(...hist.net_dl, ...hist.net_ul, 1024);
+    window._netChart.options.scales.y.max = maxVal * 1.2;
+    window._netChart.update('none');
+  }
+
+  // Disques
+  const diskEl = document.getElementById('disk-meters');
+  if (diskEl) {
+    diskEl.innerHTML = live.disks.map(d =>
+      `<div style="margin-bottom:10px">${meter(d.mountpoint + ' <span style="color:var(--muted);font-size:11px">('+d.device+' · '+d.fstype+')</span>', d.percent, fmt_bytes(d.used) + ' / ' + fmt_bytes(d.total) + ' — ' + fmt_bytes(d.free) + ' libres')}</div>`
+    ).join('') || '<span style="color:var(--muted)">Aucune partition détectée</span>';
+  }
+
+  // Températures
+  const tempEl = document.getElementById('temp-table');
+  if (tempEl) {
+    const temps = live.temperatures || {};
+    const rows = Object.values(temps).flat();
+    if (rows.length) {
+      tempEl.innerHTML = `<table><thead><tr><th>Capteur</th><th>Température</th><th>Max</th><th>Critique</th></tr></thead><tbody>` +
+        rows.map(r => {
+          const c = r.current;
+          const color = c > (r.critical || 90) ? 'var(--red)' : c > (r.high || 75) ? 'var(--yellow)' : 'var(--green)';
+          return `<tr><td>${r.label}</td><td style="color:${color};font-weight:700">${c?.toFixed(1)} °C</td><td>${r.high ? r.high+'°C' : '–'}</td><td>${r.critical ? r.critical+'°C' : '–'}</td></tr>`;
+        }).join('') + `</tbody></table>`;
+    } else {
+      tempEl.innerHTML = '<span style="color:var(--muted)">Aucun capteur de température disponible</span>';
+    }
+  }
+
+  // blink refresh dot
+  const dot = document.getElementById('refresh-dot');
+  dot.style.background = 'var(--accent)';
+  setTimeout(() => { dot.style.background = 'var(--green)'; }, 300);
+}
+
+async function load_hw_and_os() {
+  const [os, hw] = await Promise.all([
+    fetch('/api/os').then(r => r.json()),
+    fetch('/api/hardware').then(r => r.json()),
+  ]);
+  document.getElementById('hostname').textContent = '🖥️ ' + os.hostname;
+  document.getElementById('os-line').textContent = os.os + ' · ' + os.kernel + ' · ' + os.arch;
+  build_ui(os, hw);
+  hwLoaded = true;
+}
+
+async function poll() {
+  try {
+    const live = await fetch('/api/live').then(r => r.json());
+    if (!hwLoaded) return;
+    update_live(live);
+  } catch(e) {
+    document.getElementById('refresh-dot').style.background = 'var(--red)';
+  }
+}
+
+load_hw_and_os().then(() => {
+  poll();
+  setInterval(poll, 5000);
+});
+</script>
+</body>
+</html>
