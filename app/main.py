@@ -1,5 +1,4 @@
 import subprocess, json, time, re, os
-from pathlib import Path
 
 import psutil
 import cpuinfo
@@ -8,7 +7,7 @@ from fastapi.staticfiles import StaticFiles
 
 app = FastAPI()
 
-HOST_ROOT = os.environ.get("HOST_ROOT", "")  # "/rootfs" en container, "" en local
+HOST_ROOT = os.environ.get("HOST_ROOT", "")
 _net_last = {"t": 0.0, "bytes_sent": 0, "bytes_recv": 0}
 _hw_cache: dict = {}
 _hw_cache_ts = 0.0
@@ -22,36 +21,141 @@ SKIP_FS = {
 }
 
 
-def _run(cmd: list[str]) -> str:
+def _run(cmd: list[str], timeout: int = 10) -> str:
     try:
-        return subprocess.check_output(cmd, stderr=subprocess.DEVNULL, timeout=10).decode(errors="ignore")
+        r = subprocess.run(cmd, capture_output=True, timeout=timeout)
+        # smartctl peut retourner des codes non-zéro (erreurs disque) mais avec JSON valide
+        return r.stdout.decode(errors="ignore")
     except Exception:
         return ""
 
 
+# ──────────────────────────────────────────────────────────── SMART ──
+
 def _smartctl_all() -> dict:
+    """Scanne tous les disques physiques via lsblk puis smartctl."""
     result = {}
     try:
-        devs = json.loads(_run(["smartctl", "--scan-open", "-j"]))
-        for d in devs.get("devices", []):
-            name = d.get("name", "")
-            if not name:
-                continue
-            info = json.loads(_run(["smartctl", "-a", "-j", name]))
-            short = name.split("/")[-1]
-            result[name] = {
-                "device": short,
-                "model": info.get("model_name", info.get("model_family", "")),
-                "serial": info.get("serial_number", ""),
-                "health": info.get("smart_status", {}).get("passed", None),
-                "temp_c": info.get("temperature", {}).get("current", None),
-                "capacity_bytes": info.get("user_capacity", {}).get("bytes", None),
-                "rotation_rate": info.get("rotation_rate", None),
-            }
+        raw = _run(["lsblk", "-J", "-d", "-o", "NAME,TYPE"])
+        disks = [d["name"] for d in json.loads(raw).get("blockdevices", [])
+                 if d.get("type") == "disk"]
     except Exception:
-        pass
+        disks = []
+
+    for name in disks:
+        dev = f"/dev/{name}"
+        # Essayer en direct, puis avec -d sat pour disques derrière contrôleur
+        raw = _run(["smartctl", "-a", "-j", dev])
+        if not raw:
+            raw = _run(["smartctl", "-a", "-j", "-d", "sat", dev])
+        if not raw:
+            continue
+        try:
+            info = json.loads(raw)
+        except Exception:
+            continue
+        # Capacité : NVMe utilise nvme_smart_health_information_log
+        cap = info.get("user_capacity", {}).get("bytes") or \
+              info.get("nvme_smart_health_information_log", {}).get("total_data_units_written", None)
+        # Température NVMe
+        temp = info.get("temperature", {}).get("current") or \
+               info.get("nvme_smart_health_information_log", {}).get("temperature", None)
+        if temp is not None:
+            temp = temp - 273 if temp > 200 else temp  # certains firmwares donnent Kelvin
+        # Attributs critiques ATA (id→valeur brute)
+        ata_attrs = {}
+        for attr in info.get("ata_smart_attributes", {}).get("table", []):
+            ata_attrs[attr["id"]] = attr.get("raw", {}).get("value", 0)
+
+        result[dev] = {
+            "device": name,
+            "model": info.get("model_name", info.get("model_family", "")),
+            "serial": info.get("serial_number", ""),
+            "health": info.get("smart_status", {}).get("passed", None),
+            "temp_c": temp,
+            "capacity_bytes": info.get("user_capacity", {}).get("bytes", None),
+            "rotation_rate": info.get("rotation_rate", None),
+            "power_on_hours": info.get("power_on_time", {}).get("hours", None),
+            # attributs critiques
+            "reallocated_sectors": ata_attrs.get(5, None),
+            "pending_sectors": ata_attrs.get(197, None),
+            "uncorrectable": ata_attrs.get(198, None),
+            "ata_errors": info.get("ata_smart_error_log", {}).get("summary", {}).get("count", None),
+        }
     return result
 
+
+# ──────────────────────────────────────────────────────────── RAID ──
+
+def _parse_mdstat() -> list[dict]:
+    """Parse /proc/mdstat pour l'état des arrays RAID."""
+    try:
+        with open("/proc/mdstat") as f:
+            content = f.read()
+    except Exception:
+        return []
+
+    arrays = []
+    # Chercher chaque ligne "mdXXX : ..." directement (évite le problème du bloc Personalities)
+    all_lines = content.split("\n")
+    i = 0
+    while i < len(all_lines):
+        m = re.match(r"(md\d+)\s*:\s*(\w+)\s+(\S+)\s+(.*)", all_lines[i])
+        if not m:
+            i += 1
+            continue
+        # Rassembler les lignes du bloc jusqu'à la prochaine ligne vide ou prochain md
+        lines = [all_lines[i]]
+        i += 1
+        while i < len(all_lines) and all_lines[i].strip() and not re.match(r"md\d+\s*:", all_lines[i]):
+            lines.append(all_lines[i])
+            i += 1
+
+        name = m.group(1)
+        state = m.group(2)
+        level = m.group(3)
+        members_raw = m.group(4)
+
+        members = []
+        for mem in re.finditer(r"(\w+)\[(\d+)\](\(\w\))?", members_raw):
+            flag = mem.group(3) or ""
+            mstate = "faulty" if "(F)" in flag else ("spare" if "(S)" in flag else "active")
+            members.append({"device": mem.group(1), "state": mstate})
+
+        total_devs = active_devs = 0
+        disk_status = ""
+        size_bytes = 0
+        sync_action = sync_pct = sync_speed = None
+
+        for line in lines[1:]:
+            line = line.strip()
+            if "blocks" in line:
+                bm = re.search(r"\[(\d+)/(\d+)\]", line)
+                sm = re.search(r"\[([U_]+)\]", line)
+                km = re.search(r"^(\d+)\s+blocks", line)
+                if bm: total_devs, active_devs = int(bm.group(1)), int(bm.group(2))
+                if sm: disk_status = sm.group(1)
+                if km: size_bytes = int(km.group(1)) * 1024
+            elif re.search(r"(resync|recovery|reshape|check)\s*=", line):
+                am = re.search(r"(resync|recovery|reshape|check)", line)
+                pm = re.search(r"=\s*([\d.]+)%", line)
+                vm = re.search(r"speed=(\S+)", line)
+                if am: sync_action = am.group(1)
+                if pm: sync_pct = float(pm.group(1))
+                if vm: sync_speed = vm.group(1)
+
+        degraded = "_" in disk_status
+        arrays.append({
+            "name": name, "state": state, "level": level,
+            "members": members, "total_devs": total_devs, "active_devs": active_devs,
+            "disk_status": disk_status, "size_bytes": size_bytes, "degraded": degraded,
+            "sync_action": sync_action, "sync_pct": sync_pct, "sync_speed": sync_speed,
+        })
+
+    return sorted(arrays, key=lambda x: x["name"])
+
+
+# ─────────────────────────────────────────────────── HARDWARE CACHE ──
 
 def _dmidecode_memory() -> list[dict]:
     out = _run(["dmidecode", "-t", "17"])
@@ -83,18 +187,13 @@ def _dmidecode_board() -> dict:
     def get(k):
         m = re.search(rf"\t{k}:\s*(.+)", out)
         return m.group(1).strip() if m else ""
-    return {
-        "manufacturer": get("Manufacturer"),
-        "product": get("Product Name"),
-        "version": get("Version"),
-    }
+    return {"manufacturer": get("Manufacturer"), "product": get("Product Name")}
 
 
 def get_hardware() -> dict:
     global _hw_cache, _hw_cache_ts
     if time.time() - _hw_cache_ts < HW_TTL and _hw_cache:
         return _hw_cache
-
     cpu = cpuinfo.get_cpu_info()
     _hw_cache = {
         "cpu": {
@@ -112,9 +211,7 @@ def get_hardware() -> dict:
     return _hw_cache
 
 
-def _host_path(p: str) -> str:
-    return HOST_ROOT + p if HOST_ROOT else p
-
+# ──────────────────────────────────────────────────────────── DISKS ──
 
 def _flatten_lsblk(dev: dict, result: list | None = None) -> list:
     if result is None:
@@ -126,7 +223,6 @@ def _flatten_lsblk(dev: dict, result: list | None = None) -> list:
 
 
 def _read_host_disks() -> list[dict]:
-    """Enumère les vrais disques via lsblk (lit /sys) et accède aux montages via /rootfs."""
     try:
         raw = _run(["lsblk", "-J", "-b", "-o",
                     "NAME,SIZE,TYPE,MOUNTPOINT,MOUNTPOINTS,FSTYPE,LABEL"])
@@ -139,27 +235,19 @@ def _read_host_disks() -> list[dict]:
 
     for dev in data.get("blockdevices", []):
         for item in _flatten_lsblk(dev):
-            if item.get("type") not in ("part", "lvm", "disk", "raid1", "md"):
-                if item.get("type") == "disk" and not item.get("children"):
-                    pass  # disque sans partition (rare, garder)
-                elif item.get("type") != "disk":
-                    pass
-                # on garde tout sauf loop/rom/etc
-                if item.get("type") in ("loop", "rom", "sr"):
-                    continue
+            if item.get("type") in ("loop", "rom", "sr"):
+                continue
+            fstype = item.get("fstype") or ""
+            if fstype in SKIP_FS:
+                continue
 
-            mps = item.get("mountpoints") or []
+            mps = list(item.get("mountpoints") or [])
             mp = item.get("mountpoint")
             if mp and mp not in mps:
                 mps.insert(0, mp)
             mps = [m for m in mps if m and m not in ("[SWAP]", "")]
 
-            fstype = item.get("fstype") or ""
-            if fstype in SKIP_FS:
-                continue
-
             for mountpoint in mps:
-                # ne garder que les montages hôtes (commencent par HOST_ROOT si défini)
                 if HOST_ROOT:
                     if not mountpoint.startswith(HOST_ROOT + "/") and mountpoint != HOST_ROOT:
                         continue
@@ -196,6 +284,8 @@ def _read_host_disks() -> list[dict]:
     return result
 
 
+# ───────────────────────────────────────────────────────────── LIVE ──
+
 def get_live() -> dict:
     global _net_last
 
@@ -203,10 +293,8 @@ def get_live() -> dict:
     cpu_freq = psutil.cpu_freq()
     mem = psutil.virtual_memory()
     swap = psutil.swap_memory()
-
     disks = _read_host_disks()
 
-    # réseau — avec network_mode:host on lit directement les stats hôte
     net_now = psutil.net_io_counters()
     now = time.time()
     dt = now - _net_last["t"] if _net_last["t"] else 1.0
@@ -214,11 +302,16 @@ def get_live() -> dict:
     ul = (net_now.bytes_sent - _net_last["bytes_sent"]) / dt if _net_last["t"] else 0
     _net_last = {"t": now, "bytes_sent": net_now.bytes_sent, "bytes_recv": net_now.bytes_recv}
 
+    # Interfaces : filtrer loopback et bridges Docker
     net_ifaces = {}
+    stats = psutil.net_if_stats()
     for iface, addrs in psutil.net_if_addrs().items():
+        if iface == "lo" or iface.startswith("br-") or iface == "docker0":
+            continue
         for a in addrs:
-            if a.family == 2:  # AF_INET
-                net_ifaces[iface] = a.address
+            if a.family == 2:
+                up = stats.get(iface, None)
+                net_ifaces[iface] = {"ip": a.address, "up": bool(up and up.isup)}
                 break
 
     uptime_s = int(time.time() - psutil.boot_time())
@@ -250,9 +343,7 @@ def get_live() -> dict:
             "buffers": getattr(mem, "buffers", 0),
             "cached": getattr(mem, "cached", 0),
         },
-        "swap": {
-            "total": swap.total, "used": swap.used, "percent": swap.percent,
-        },
+        "swap": {"total": swap.total, "used": swap.used, "percent": swap.percent},
         "disks": disks,
         "network": {
             "dl_bps": max(0.0, dl),
@@ -265,6 +356,8 @@ def get_live() -> dict:
     }
 
 
+# ──────────────────────────────────────────────────────────── ROUTES ──
+
 _os_cache: dict = {}
 
 
@@ -273,19 +366,15 @@ def _get_os_info() -> dict:
     os_name = _run(["lsb_release", "-ds"]).strip()
     if not os_name:
         try:
-            with open(_host_path("/etc/os-release")) as f:
+            with open(HOST_ROOT + "/etc/os-release" if HOST_ROOT else "/etc/os-release") as f:
                 for line in f:
                     if line.startswith("PRETTY_NAME="):
                         os_name = line.split("=", 1)[1].strip().strip('"')
                         break
         except Exception:
             os_name = uname.sysname
-    return {
-        "hostname": uname.nodename,
-        "os": os_name,
-        "kernel": uname.release,
-        "arch": uname.machine,
-    }
+    return {"hostname": uname.nodename, "os": os_name,
+            "kernel": uname.release, "arch": uname.machine}
 
 
 @app.get("/api/os")
@@ -304,6 +393,11 @@ def api_hardware():
 @app.get("/api/live")
 def api_live():
     return get_live()
+
+
+@app.get("/api/raid")
+def api_raid():
+    return _parse_mdstat()
 
 
 app.mount("/", StaticFiles(directory="/app/static", html=True), name="static")

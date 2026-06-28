@@ -5,68 +5,71 @@
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>HomeLab Dashboard</title>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/sortablejs@1.15.3/Sortable.min.js"></script>
 <style>
   :root {
-    --bg: #0d1117;
-    --card: #161b22;
-    --border: #30363d;
-    --text: #e6edf3;
-    --muted: #8b949e;
-    --accent: #58a6ff;
-    --green: #3fb950;
-    --yellow: #d29922;
-    --red: #f85149;
-    --purple: #bc8cff;
-    --teal: #39d353;
-    --orange: #f0883e;
+    --bg: #0d1117; --card: #161b22; --border: #30363d;
+    --text: #e6edf3; --muted: #8b949e; --accent: #58a6ff;
+    --green: #3fb950; --yellow: #d29922; --red: #f85149;
+    --purple: #bc8cff; --teal: #39d353; --orange: #f0883e;
   }
   * { box-sizing: border-box; margin: 0; padding: 0; }
-  body { background: var(--bg); color: var(--text); font-family: 'Segoe UI', system-ui, sans-serif; font-size: 14px; min-height: 100vh; }
+  body { background: var(--bg); color: var(--text); font-family: 'Segoe UI', system-ui, sans-serif; font-size: 14px; }
 
   header {
     display: flex; align-items: center; gap: 16px;
-    padding: 16px 24px;
-    background: var(--card);
+    padding: 14px 24px; background: var(--card);
     border-bottom: 1px solid var(--border);
-    position: sticky; top: 0; z-index: 10;
+    position: sticky; top: 0; z-index: 100;
   }
-  header h1 { font-size: 18px; font-weight: 600; letter-spacing: .5px; color: var(--accent); }
-  .header-meta { margin-left: auto; display: flex; gap: 20px; align-items: center; }
-  .badge { padding: 3px 10px; border-radius: 12px; font-size: 12px; font-weight: 600; }
-  .badge-ok { background: #1f4024; color: var(--green); border: 1px solid #2d5a31; }
-  .badge-warn { background: #3b2a1a; color: var(--yellow); border: 1px solid #5a3e1a; }
-  .badge-err { background: #3b1219; color: var(--red); border: 1px solid #5a1a22; }
+  header h1 { font-size: 17px; font-weight: 600; color: var(--accent); }
+  .header-right { margin-left: auto; display: flex; gap: 20px; align-items: center; }
   #uptime-label { color: var(--muted); font-size: 13px; }
-  #refresh-dot { width:8px;height:8px;border-radius:50%;background:var(--green);display:inline-block;margin-right:4px; }
+  #refresh-dot { width:8px;height:8px;border-radius:50%;background:var(--green);display:inline-block;margin-right:5px; transition: background .2s; }
+  .hint { font-size: 11px; color: var(--muted); display: flex; align-items: center; gap: 5px; }
+  .drag-icon { cursor: grab; opacity: .5; }
 
-  main { padding: 20px 24px; display: grid; gap: 16px; grid-template-columns: repeat(auto-fill, minmax(340px, 1fr)); }
+  /* GRID */
+  #grid { padding: 20px 24px; display: grid; gap: 16px; grid-template-columns: repeat(12, 1fr); }
 
   .card {
     background: var(--card); border: 1px solid var(--border); border-radius: 10px;
     padding: 16px; display: flex; flex-direction: column; gap: 10px;
+    cursor: default; transition: box-shadow .15s;
   }
-  .card.wide { grid-column: 1 / -1; }
-  .card.two { grid-column: span 2; }
+  .card:hover { box-shadow: 0 0 0 1px var(--border); }
+  .card.sortable-ghost { opacity: .35; background: #21262d; }
+  .card.sortable-chosen { box-shadow: 0 4px 20px #00000088; z-index: 50; }
 
-  .card-title { font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: 1px; color: var(--muted); display: flex; align-items: center; gap: 8px; }
-  .card-title .icon { font-size: 16px; }
+  /* column spans */
+  .col-4  { grid-column: span 4; }
+  .col-6  { grid-column: span 6; }
+  .col-8  { grid-column: span 8; }
+  .col-12 { grid-column: span 12; }
+  @media (max-width: 1100px) { .col-4,.col-6,.col-8 { grid-column: span 12; } }
+  @media (min-width: 1101px) and (max-width: 1400px) { .col-4 { grid-column: span 6; } }
+
+  .card-title {
+    font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 1px;
+    color: var(--muted); display: flex; align-items: center; gap: 8px;
+    cursor: grab; user-select: none;
+  }
+  .card-title .icon { font-size: 15px; }
+  .card-title .drag-handle { margin-left: auto; opacity: .4; font-size: 14px; }
 
   .info-row { display: flex; justify-content: space-between; align-items: baseline; border-bottom: 1px solid #21262d; padding: 5px 0; }
   .info-row:last-child { border-bottom: none; }
-  .info-key { color: var(--muted); }
-  .info-val { font-weight: 600; color: var(--text); text-align: right; max-width: 60%; word-break: break-all; }
+  .info-key { color: var(--muted); white-space: nowrap; }
+  .info-val { font-weight: 600; text-align: right; max-width: 65%; word-break: break-all; }
 
-  .meter-wrap { display: flex; flex-direction: column; gap: 4px; }
+  .meter-wrap { display: flex; flex-direction: column; gap: 4px; margin-bottom: 4px; }
   .meter-label { display: flex; justify-content: space-between; font-size: 12px; }
   .meter-bar { height: 8px; background: #21262d; border-radius: 4px; overflow: hidden; }
   .meter-fill { height: 100%; border-radius: 4px; transition: width .5s; }
-  .fill-green { background: var(--green); }
-  .fill-yellow { background: var(--yellow); }
-  .fill-red { background: var(--red); }
-  .fill-blue { background: var(--accent); }
-  .fill-purple { background: var(--purple); }
+  .fill-green { background: var(--green); } .fill-yellow { background: var(--yellow); } .fill-red { background: var(--red); }
+  .fill-blue { background: var(--accent); } .fill-purple { background: var(--purple); }
 
-  .chart-wrap { position: relative; height: 140px; }
+  .chart-wrap { position: relative; height: 130px; }
 
   table { width: 100%; border-collapse: collapse; font-size: 13px; }
   th { text-align: left; padding: 6px 8px; color: var(--muted); font-weight: 600; border-bottom: 1px solid var(--border); font-size: 11px; text-transform: uppercase; }
@@ -74,358 +77,432 @@
   tr:last-child td { border-bottom: none; }
   tr:hover td { background: #1c2128; }
 
-  .smart-ok { color: var(--green); font-weight: 700; }
-  .smart-fail { color: var(--red); font-weight: 700; }
-  .smart-unk { color: var(--muted); }
+  .ok   { color: var(--green); font-weight: 700; }
+  .warn { color: var(--yellow); font-weight: 700; }
+  .err  { color: var(--red); font-weight: 700; }
+  .unk  { color: var(--muted); }
 
-  .core-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(90px, 1fr)); gap: 6px; }
+  .core-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(80px, 1fr)); gap: 5px; }
   .core-item { background: #21262d; border-radius: 6px; padding: 6px 8px; }
-  .core-item .core-name { font-size: 10px; color: var(--muted); margin-bottom: 3px; }
-  .core-item .core-val { font-weight: 700; font-size: 13px; }
+  .core-name { font-size: 10px; color: var(--muted); margin-bottom: 2px; }
+  .core-val  { font-weight: 700; font-size: 13px; }
 
-  .net-stats { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
-  .net-stat { background: #21262d; border-radius: 8px; padding: 12px; text-align: center; }
-  .net-stat .ns-label { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing:.5px; margin-bottom: 4px; }
-  .net-stat .ns-val { font-size: 22px; font-weight: 700; }
-  .net-stat .ns-unit { font-size: 11px; color: var(--muted); }
-  .dl-color { color: var(--teal); }
-  .ul-color { color: var(--orange); }
+  .net-stats { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  .net-stat { background: #21262d; border-radius: 8px; padding: 10px; text-align: center; }
+  .ns-label { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: .5px; margin-bottom: 4px; }
+  .ns-val   { font-size: 22px; font-weight: 700; }
+  .ns-unit  { font-size: 11px; color: var(--muted); }
+  .dl-color { color: var(--teal); } .ul-color { color: var(--orange); }
+  .iface-row { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 6px; }
+  .iface-chip { background: #21262d; border-radius: 6px; padding: 4px 10px; font-size: 12px; display: flex; align-items: center; gap: 6px; }
+  .iface-dot { width: 6px; height: 6px; border-radius: 50%; }
 
-  .stick-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 8px; }
-  .stick { background: #21262d; border-radius: 8px; padding: 10px 12px; display: flex; flex-direction: column; gap: 4px; }
-  .stick .s-slot { font-size: 10px; color: var(--muted); font-weight: 700; text-transform: uppercase; }
-  .stick .s-size { font-size: 18px; font-weight: 800; color: var(--accent); }
-  .stick .s-info { font-size: 11px; color: var(--muted); }
+  .stick-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 8px; }
+  .stick { background: #21262d; border-radius: 8px; padding: 10px 12px; }
+  .s-slot { font-size: 10px; color: var(--muted); font-weight: 700; text-transform: uppercase; }
+  .s-size { font-size: 18px; font-weight: 800; color: var(--accent); }
+  .s-info { font-size: 11px; color: var(--muted); }
 
-  #loading { text-align: center; padding: 60px; color: var(--muted); font-size: 16px; grid-column: 1 / -1; }
+  /* RAID */
+  .raid-grid { display: grid; gap: 10px; }
+  .raid-array { background: #21262d; border-radius: 8px; padding: 12px 14px; display: flex; flex-direction: column; gap: 8px; }
+  .raid-header { display: flex; align-items: center; gap: 10px; }
+  .raid-name { font-size: 16px; font-weight: 800; color: var(--accent); }
+  .raid-badge { padding: 2px 8px; border-radius: 10px; font-size: 11px; font-weight: 700; }
+  .raid-ok   { background: #1f4024; color: var(--green); border: 1px solid #2d5a31; }
+  .raid-warn { background: #3b2a1a; color: var(--yellow); border: 1px solid #5a3e1a; }
+  .raid-err  { background: #3b1219; color: var(--red);    border: 1px solid #5a1a22; }
+  .raid-info { font-size: 12px; color: var(--muted); margin-left: auto; }
+  .raid-members { display: flex; flex-wrap: wrap; gap: 6px; }
+  .raid-member { padding: 3px 10px; border-radius: 6px; font-size: 12px; font-weight: 600; }
+  .member-ok    { background: #1f4024; color: var(--green); }
+  .member-spare { background: #1c2332; color: var(--accent); }
+  .member-fault { background: #3b1219; color: var(--red); }
+  .raid-disks { font-size: 12px; letter-spacing: 2px; }
+  .disk-u { color: var(--green); } .disk-d { color: var(--red); }
+  .raid-sync { font-size: 12px; color: var(--yellow); }
 </style>
 </head>
 <body>
 <header>
-  <span style="font-size:24px">🖥️</span>
+  <span style="font-size:22px">🖥️</span>
   <div>
-    <h1 id="hostname">HomeLab Dashboard</h1>
+    <h1 id="hostname">HomeLab</h1>
     <div style="font-size:12px;color:var(--muted)" id="os-line">Chargement…</div>
   </div>
-  <div class="header-meta">
+  <div class="header-right">
     <span id="uptime-label">–</span>
-    <span><span id="refresh-dot"></span><span style="font-size:12px;color:var(--muted)">live</span></span>
+    <span class="hint"><span id="refresh-dot"></span>live</span>
+    <span class="hint drag-icon" title="Glisser les blocs pour les réorganiser">⠿ Réorganisable</span>
   </div>
 </header>
-<main id="main"><div id="loading">⏳ Chargement des données…</div></main>
+
+<div id="grid"></div>
 
 <script>
 const HIST_LEN = 40;
-const hist = {
-  cpu: [], net_dl: [], net_ul: [], mem: []
-};
-let cpuChart, netChart;
+const hist = { cpu: [], net_dl: [], net_ul: [], mem: [] };
+let charts = {};
 let hwLoaded = false;
 
-function fmt_bytes(b, dec=1) {
-  if (b == null) return '–';
-  if (b === 0) return '0 B';
-  const sizes = ['B','KB','MB','GB','TB'];
-  const i = Math.floor(Math.log(Math.abs(b)) / Math.log(1024));
-  return (b / Math.pow(1024, i)).toFixed(dec) + ' ' + sizes[i];
+// ──────────────────────────────── helpers ──
+const fmt_bytes = (b, d=1) => {
+  if (b == null || b === 0) return '0 B';
+  const s = ['B','KB','MB','GB','TB'];
+  const i = Math.floor(Math.log(Math.abs(b))/Math.log(1024));
+  return (b/Math.pow(1024,i)).toFixed(d)+' '+s[Math.min(i,4)];
+};
+const fmt_bps = b => {
+  if (b < 1024) return b.toFixed(0)+' B/s';
+  if (b < 1048576) return (b/1024).toFixed(1)+' KB/s';
+  return (b/1048576).toFixed(2)+' MB/s';
+};
+const fmt_uptime = s => {
+  const d=Math.floor(s/86400),h=Math.floor((s%86400)/3600),m=Math.floor((s%3600)/60);
+  return [d&&d+'j',h&&h+'h',m+'m'].filter(Boolean).join(' ');
+};
+const fill_cls = p => p>85?'fill-red':p>60?'fill-yellow':'fill-green';
+const meter = (label, pct, detail='') =>
+  `<div class="meter-wrap">
+    <div class="meter-label"><span>${label}</span><span><b>${pct.toFixed(1)}%</b>${detail?' · '+detail:''}</span></div>
+    <div class="meter-bar"><div class="meter-fill ${fill_cls(pct)}" style="width:${Math.min(pct,100)}%"></div></div>
+   </div>`;
+const info_row = (k,v) => `<div class="info-row"><span class="info-key">${k}</span><span class="info-val">${v??'–'}</span></div>`;
+const push = (arr,v) => { arr.push(v); if(arr.length>HIST_LEN) arr.shift(); };
+const pad = arr => [...Array(HIST_LEN-arr.length).fill(null),...arr].slice(-HIST_LEN);
+
+// ──────────────────────────────── drag & drop order ──
+const ORDER_KEY = 'hld_card_order';
+function save_order() {
+  const ids = [...document.querySelectorAll('#grid .card')].map(c=>c.id);
+  localStorage.setItem(ORDER_KEY, JSON.stringify(ids));
 }
-function fmt_bps(bps) {
-  if (bps < 1024) return bps.toFixed(0) + ' B/s';
-  if (bps < 1048576) return (bps/1024).toFixed(1) + ' KB/s';
-  return (bps/1048576).toFixed(2) + ' MB/s';
-}
-function fmt_uptime(s) {
-  const d = Math.floor(s/86400), h = Math.floor((s%86400)/3600), m = Math.floor((s%3600)/60);
-  const parts = [];
-  if (d) parts.push(d+'j');
-  if (h) parts.push(h+'h');
-  parts.push(m+'m');
-  return parts.join(' ');
-}
-function fill_color(pct) {
-  if (pct > 85) return 'fill-red';
-  if (pct > 60) return 'fill-yellow';
-  return 'fill-green';
-}
-function meter(label, pct, detail='') {
-  const cls = fill_color(pct);
-  return `<div class="meter-wrap">
-    <div class="meter-label"><span>${label}</span><span><b>${pct.toFixed(1)}%</b>${detail ? ' · '+detail : ''}</span></div>
-    <div class="meter-bar"><div class="meter-fill ${cls}" style="width:${pct}%"></div></div>
-  </div>`;
-}
-function info_row(k, v) {
-  return `<div class="info-row"><span class="info-key">${k}</span><span class="info-val">${v ?? '–'}</span></div>`;
-}
-function push_hist(arr, val) {
-  arr.push(val);
-  if (arr.length > HIST_LEN) arr.shift();
+function apply_order() {
+  const saved = JSON.parse(localStorage.getItem(ORDER_KEY)||'null');
+  if (!saved) return;
+  const grid = document.getElementById('grid');
+  saved.forEach(id => {
+    const el = document.getElementById(id);
+    if (el) grid.appendChild(el);
+  });
 }
 
-function build_ui(os, hw) {
-  const main = document.getElementById('main');
-  main.innerHTML = `
-    <!-- OS + Board -->
-    <div class="card" id="card-os">
-      <div class="card-title"><span class="icon">🐧</span> Système</div>
-      ${info_row('Hostname', os.hostname)}
-      ${info_row('OS', os.os)}
-      ${info_row('Kernel', os.kernel)}
-      ${info_row('Architecture', os.arch)}
-      ${info_row('Carte mère', [hw.board.manufacturer, hw.board.product].filter(Boolean).join(' · '))}
-    </div>
+// ──────────────────────────────── card builder ──
+function make_card(id, col, icon, title, content) {
+  const d = document.createElement('div');
+  d.className = `card ${col}`;
+  d.id = id;
+  d.innerHTML = `
+    <div class="card-title"><span class="icon">${icon}</span>${title}<span class="drag-handle" title="Déplacer">⠿</span></div>
+    <div class="card-body">${content}</div>`;
+  return d;
+}
+function set_body(id, html) {
+  const el = document.getElementById(id);
+  if (el) el.querySelector('.card-body').innerHTML = html;
+}
 
-    <!-- CPU info -->
-    <div class="card" id="card-cpu-info">
-      <div class="card-title"><span class="icon">⚡</span> Processeur</div>
-      ${info_row('Modèle', hw.cpu.brand)}
-      ${info_row('Architecture', hw.cpu.arch)}
-      ${info_row('Fréquence annoncée', hw.cpu.hz_advertised)}
-      ${info_row('Cœurs physiques', hw.cpu.cores_physical)}
-      ${info_row('Threads logiques', hw.cpu.cores_logical)}
-      <div id="cpu-live-rows"></div>
-    </div>
-
-    <!-- CPU usage graph -->
-    <div class="card" id="card-cpu-graph">
-      <div class="card-title"><span class="icon">📈</span> Utilisation CPU</div>
-      <div id="cpu-meter-wrap"></div>
-      <div class="chart-wrap"><canvas id="chart-cpu"></canvas></div>
-      <div class="core-grid" id="core-grid"></div>
-    </div>
-
-    <!-- RAM hardware -->
-    <div class="card" id="card-ram-hw">
-      <div class="card-title"><span class="icon">🧩</span> Mémoire — hardware</div>
-      <div class="stick-grid" id="stick-grid">
-        ${hw.memory_sticks.length ? hw.memory_sticks.map(s => `
-          <div class="stick">
-            <div class="s-slot">${s.locator}</div>
-            <div class="s-size">${s.size}</div>
-            <div class="s-info">${s.type}${s.speed ? ' · ' + s.speed : ''}</div>
-            <div class="s-info">${s.manufacturer !== 'Unknown' ? s.manufacturer : ''}${s.part_number !== 'Unknown' ? ' · ' + s.part_number : ''}</div>
-          </div>`) .join('') : '<span style="color:var(--muted)">dmidecode indisponible</span>'}
-      </div>
-    </div>
-
-    <!-- RAM usage -->
-    <div class="card" id="card-ram-usage">
-      <div class="card-title"><span class="icon">💾</span> Utilisation mémoire</div>
-      <div id="ram-meters"></div>
-      <div class="chart-wrap"><canvas id="chart-mem"></canvas></div>
-    </div>
-
-    <!-- Network graph -->
-    <div class="card two" id="card-net">
-      <div class="card-title"><span class="icon">🌐</span> Réseau</div>
-      <div class="net-stats">
-        <div class="net-stat"><div class="ns-label">⬇ Download</div><div class="ns-val dl-color" id="net-dl">–</div><div class="ns-unit" id="net-dl-tot"></div></div>
-        <div class="net-stat"><div class="ns-label">⬆ Upload</div><div class="ns-val ul-color" id="net-ul">–</div><div class="ns-unit" id="net-ul-tot"></div></div>
-      </div>
-      <div class="chart-wrap" style="height:160px"><canvas id="chart-net"></canvas></div>
-      <div id="net-ifaces" style="margin-top:4px"></div>
-    </div>
-
-    <!-- Disques partitions -->
-    <div class="card wide" id="card-disks">
-      <div class="card-title"><span class="icon">💿</span> Espace disque</div>
-      <div id="disk-meters"></div>
-    </div>
-
-    <!-- SMART -->
-    <div class="card wide" id="card-smart">
-      <div class="card-title"><span class="icon">🔍</span> S.M.A.R.T — état des disques</div>
-      ${Object.keys(hw.smart).length ? `
-      <table>
-        <thead><tr><th>Périphérique</th><th>Modèle</th><th>Série</th><th>Capacité</th><th>Santé</th><th>Température</th></tr></thead>
-        <tbody id="smart-tbody">
-          ${Object.entries(hw.smart).map(([dev, s]) => `
-          <tr>
-            <td><code>${s.device}</code></td>
-            <td>${s.model || '–'}</td>
-            <td>${s.serial || '–'}</td>
-            <td>${fmt_bytes(s.capacity_bytes)}</td>
-            <td class="${s.health === true ? 'smart-ok' : s.health === false ? 'smart-fail' : 'smart-unk'}">${s.health === true ? '✅ PASSED' : s.health === false ? '❌ FAILED' : '❓ –'}</td>
-            <td>${s.temp_c != null ? s.temp_c + ' °C' : '–'}</td>
-          </tr>`).join('')}
-        </tbody>
-      </table>` : '<span style="color:var(--muted)">smartctl indisponible ou aucun disque SMART détecté</span>'}
-    </div>
-
-    <!-- Températures -->
-    <div class="card" id="card-temps">
-      <div class="card-title"><span class="icon">🌡️</span> Températures</div>
-      <div id="temp-table"></div>
-    </div>
-  `;
-
-  // init charts
-  const chartOpts = (label, color1, color2) => ({
+// ──────────────────────────────── charts ──
+function make_line(id, label, color) {
+  const ctx = document.getElementById(id)?.getContext('2d');
+  if (!ctx) return null;
+  return new Chart(ctx, {
     type: 'line',
-    data: { labels: Array(HIST_LEN).fill(''), datasets: [{
-      label: label, data: Array(HIST_LEN).fill(null),
-      borderColor: color1, backgroundColor: color1 + '22',
-      fill: true, tension: 0.4, pointRadius: 0, borderWidth: 2
-    }] },
+    data: {
+      labels: Array(HIST_LEN).fill(''),
+      datasets: [{ label, data: Array(HIST_LEN).fill(null),
+        borderColor: color, backgroundColor: color+'22', fill: true,
+        tension: .4, pointRadius: 0, borderWidth: 2 }]
+    },
     options: {
       animation: false, responsive: true, maintainAspectRatio: false,
-      plugins: { legend: { display: false } },
-      scales: {
-        x: { display: false },
-        y: { min: 0, max: 100, grid: { color: '#21262d' }, ticks: { color: '#8b949e', font: { size: 10 } } }
-      }
+      plugins:{ legend:{ display: false } },
+      scales:{ x:{display:false}, y:{ min:0, max:100, grid:{color:'#21262d'}, ticks:{color:'#8b949e',font:{size:10}} } }
     }
   });
-
-  cpuChart = new Chart(document.getElementById('chart-cpu').getContext('2d'), chartOpts('CPU %', '#58a6ff'));
-
-  const memCtx = document.getElementById('chart-mem').getContext('2d');
-  window._memChart = new Chart(memCtx, {
-    type: 'line',
-    data: { labels: Array(HIST_LEN).fill(''), datasets: [{
-      label: 'RAM %', data: Array(HIST_LEN).fill(null),
-      borderColor: '#bc8cff', backgroundColor: '#bc8cff22',
-      fill: true, tension: 0.4, pointRadius: 0, borderWidth: 2
-    }] },
-    options: { animation: false, responsive: true, maintainAspectRatio: false,
-      plugins: { legend: { display: false } },
-      scales: { x: { display: false }, y: { min: 0, max: 100, grid: { color: '#21262d' }, ticks: { color: '#8b949e', font: { size: 10 } } } }
-    }
-  });
-
-  const netCtx = document.getElementById('chart-net').getContext('2d');
-  window._netChart = new Chart(netCtx, {
+}
+function make_net_chart(id) {
+  const ctx = document.getElementById(id)?.getContext('2d');
+  if (!ctx) return null;
+  return new Chart(ctx, {
     type: 'line',
     data: {
       labels: Array(HIST_LEN).fill(''),
       datasets: [
-        { label: '⬇ DL', data: Array(HIST_LEN).fill(null), borderColor: '#39d353', backgroundColor: '#39d35322', fill: true, tension: 0.4, pointRadius: 0, borderWidth: 2 },
-        { label: '⬆ UL', data: Array(HIST_LEN).fill(null), borderColor: '#f0883e', backgroundColor: '#f0883e22', fill: true, tension: 0.4, pointRadius: 0, borderWidth: 2 },
+        { label:'⬇ DL', data: Array(HIST_LEN).fill(null), borderColor:'#39d353', backgroundColor:'#39d35322', fill:true, tension:.4, pointRadius:0, borderWidth:2 },
+        { label:'⬆ UL', data: Array(HIST_LEN).fill(null), borderColor:'#f0883e', backgroundColor:'#f0883e22', fill:true, tension:.4, pointRadius:0, borderWidth:2 },
       ]
     },
     options: {
-      animation: false, responsive: true, maintainAspectRatio: false,
-      plugins: { legend: { display: true, labels: { color: '#8b949e', boxWidth: 12, font: { size: 11 } } } },
-      scales: { x: { display: false }, y: { min: 0, grid: { color: '#21262d' }, ticks: { color: '#8b949e', font: { size: 10 }, callback: v => fmt_bps(v) } } }
+      animation:false, responsive:true, maintainAspectRatio:false,
+      plugins:{ legend:{ display:true, labels:{ color:'#8b949e', boxWidth:12, font:{size:11} } } },
+      scales:{ x:{display:false}, y:{ min:0, grid:{color:'#21262d'}, ticks:{color:'#8b949e',font:{size:10},callback:v=>fmt_bps(v)} } }
     }
   });
 }
 
+// ──────────────────────────────── build UI ──
+function build_ui(os, hw, raid) {
+  document.getElementById('hostname').textContent = '🖥️ ' + os.hostname;
+  document.getElementById('os-line').textContent = os.os + ' · ' + os.kernel + ' · ' + os.arch;
+
+  const grid = document.getElementById('grid');
+  grid.innerHTML = '';
+
+  // OS
+  grid.appendChild(make_card('card-os','col-4','🐧','Système',
+    info_row('Hostname', os.hostname) +
+    info_row('OS', os.os) +
+    info_row('Kernel', os.kernel) +
+    info_row('Architecture', os.arch) +
+    info_row('Carte mère', [hw.board.manufacturer, hw.board.product].filter(Boolean).join(' · '))
+  ));
+
+  // CPU info
+  grid.appendChild(make_card('card-cpu-info','col-4','⚡','Processeur',
+    info_row('Modèle', hw.cpu.brand) +
+    info_row('Architecture', hw.cpu.arch) +
+    info_row('Fréquence', hw.cpu.hz_advertised) +
+    info_row('Cœurs physiques', hw.cpu.cores_physical) +
+    info_row('Threads', hw.cpu.cores_logical) +
+    '<div id="cpu-live-rows"></div>'
+  ));
+
+  // CPU graph
+  grid.appendChild(make_card('card-cpu-graph','col-4','📈','Utilisation CPU',
+    '<div id="cpu-meter-wrap"></div>' +
+    '<div class="chart-wrap"><canvas id="chart-cpu"></canvas></div>' +
+    '<div class="core-grid" id="core-grid"></div>'
+  ));
+
+  // RAM hw
+  grid.appendChild(make_card('card-ram-hw','col-4','🧩','Mémoire — hardware',
+    '<div class="stick-grid">' + (hw.memory_sticks.length
+      ? hw.memory_sticks.map(s => `
+          <div class="stick">
+            <div class="s-slot">${s.locator}</div>
+            <div class="s-size">${s.size}</div>
+            <div class="s-info">${s.type}${s.speed?' · '+s.speed:''}</div>
+            <div class="s-info">${[s.manufacturer!=='Unknown'?s.manufacturer:'', s.part_number!=='Unknown'?s.part_number:''].filter(Boolean).join(' · ')}</div>
+          </div>`).join('')
+      : '<span style="color:var(--muted)">dmidecode indisponible</span>') + '</div>'
+  ));
+
+  // RAM usage
+  grid.appendChild(make_card('card-ram-usage','col-4','💾','Utilisation mémoire',
+    '<div id="ram-meters"></div>' +
+    '<div class="chart-wrap"><canvas id="chart-mem"></canvas></div>'
+  ));
+
+  // Network
+  grid.appendChild(make_card('card-net','col-4','🌐','Réseau',
+    '<div class="net-stats">' +
+    '<div class="net-stat"><div class="ns-label">⬇ Download</div><div class="ns-val dl-color" id="net-dl">–</div><div class="ns-unit" id="net-dl-tot"></div></div>' +
+    '<div class="net-stat"><div class="ns-label">⬆ Upload</div><div class="ns-val ul-color" id="net-ul">–</div><div class="ns-unit" id="net-ul-tot"></div></div>' +
+    '</div>' +
+    '<div class="chart-wrap"><canvas id="chart-net"></canvas></div>' +
+    '<div class="iface-row" id="net-ifaces"></div>'
+  ));
+
+  // RAID
+  const raidHtml = raid.length
+    ? '<div class="raid-grid">' + raid.map(r => {
+        const health = r.degraded ? 'warn' : (r.state !== 'active' ? 'err' : 'ok');
+        const label  = r.degraded ? '⚠ DÉGRADÉ' : (r.state !== 'active' ? '✗ INACTIF' : '✅ OK');
+        const disks  = [...r.disk_status].map(c =>
+          `<span class="${c==='U'?'disk-u':'disk-d'}">${c==='U'?'█':'░'}</span>`).join('');
+        const members = r.members.map(m =>
+          `<span class="raid-member member-${m.state}">${m.device}</span>`).join('');
+        const sync = r.sync_action
+          ? `<div class="raid-sync">🔄 ${r.sync_action} ${r.sync_pct!=null?r.sync_pct.toFixed(1)+'%':''} ${r.sync_speed||''}</div>`
+          : '';
+        return `<div class="raid-array">
+          <div class="raid-header">
+            <span class="raid-name">${r.name}</span>
+            <span class="raid-badge raid-${health}">${label}</span>
+            <span class="raid-info">${r.level.toUpperCase()} · ${r.active_devs}/${r.total_devs} disques · ${fmt_bytes(r.size_bytes)}</span>
+          </div>
+          <div class="raid-disks" title="U=sain ░=absent">${disks}</div>
+          <div class="raid-members">${members}</div>
+          ${sync}
+        </div>`;
+      }).join('') + '</div>'
+    : '<span style="color:var(--muted)">Aucun array RAID détecté</span>';
+  grid.appendChild(make_card('card-raid','col-6','⚙️','Arrays RAID', raidHtml));
+
+  // Disques
+  grid.appendChild(make_card('card-disks','col-6','💿','Espace disque',
+    '<div id="disk-meters"></div>'
+  ));
+
+  // SMART
+  const smartRows = Object.values(hw.smart);
+  const smartHtml = smartRows.length
+    ? `<table><thead><tr><th>Disque</th><th>Modèle</th><th>Capacité</th><th>Santé</th><th>Temp.</th><th>Allumé</th><th>Réalloués</th><th>Pending</th><th>Erreurs ATA</th></tr></thead><tbody>` +
+      smartRows.map(s => {
+        const realloc = s.reallocated_sectors ?? null;
+        const pending = s.pending_sectors ?? null;
+        const ataErr  = s.ata_errors ?? null;
+        const warn = (realloc > 0) || (pending > 0) || (ataErr > 100);
+        const rowCls = warn ? 'style="background:#1c1510"' : '';
+        const num = (v, bad) => v == null ? '–'
+          : v === 0 ? `<span style="color:var(--green)">0</span>`
+          : `<span class="${bad?'err':'warn'}">${v.toLocaleString()}</span>`;
+        return `<tr ${rowCls}>
+          <td><code>${s.device}</code></td>
+          <td>${s.model||'–'}</td>
+          <td>${fmt_bytes(s.capacity_bytes)}</td>
+          <td class="${s.health===true?'ok':s.health===false?'err':'unk'}">${s.health===true?'✅ PASSED':s.health===false?'❌ FAILED':'❓ –'}</td>
+          <td>${s.temp_c!=null?s.temp_c+' °C':'–'}</td>
+          <td>${s.power_on_hours!=null?Math.round(s.power_on_hours/24)+' j':'–'}</td>
+          <td>${num(realloc, realloc>100)}</td>
+          <td>${num(pending, pending>0)}</td>
+          <td>${num(ataErr, ataErr>500)}</td>
+        </tr>`;
+      }).join('') + '</tbody></table>'
+    : '<span style="color:var(--muted)">smartctl indisponible</span>';
+  grid.appendChild(make_card('card-smart','col-12','🔍','S.M.A.R.T — état des disques', smartHtml));
+
+  // Températures
+  grid.appendChild(make_card('card-temps','col-4','🌡️','Températures',
+    '<div id="temp-table"></div>'
+  ));
+
+  // Restaurer l'ordre mémorisé
+  apply_order();
+
+  // Init charts
+  charts.cpu = make_line('chart-cpu', 'CPU %', '#58a6ff');
+  charts.mem = new Chart(document.getElementById('chart-mem').getContext('2d'), {
+    type:'line', data:{ labels:Array(HIST_LEN).fill(''), datasets:[{
+      label:'RAM %', data:Array(HIST_LEN).fill(null),
+      borderColor:'#bc8cff', backgroundColor:'#bc8cff22', fill:true, tension:.4, pointRadius:0, borderWidth:2
+    }]},
+    options:{ animation:false, responsive:true, maintainAspectRatio:false,
+      plugins:{legend:{display:false}},
+      scales:{x:{display:false}, y:{min:0,max:100,grid:{color:'#21262d'},ticks:{color:'#8b949e',font:{size:10}}}} }
+  });
+  charts.net = make_net_chart('chart-net');
+
+  // Sortable drag & drop
+  Sortable.create(document.getElementById('grid'), {
+    animation: 150,
+    ghostClass: 'sortable-ghost',
+    chosenClass: 'sortable-chosen',
+    handle: '.card-title',
+    onEnd: save_order,
+  });
+
+  hwLoaded = true;
+}
+
+// ──────────────────────────────── update live ──
 function update_live(live) {
-  // uptime
   document.getElementById('uptime-label').textContent = '⏱ ' + fmt_uptime(live.uptime_s);
 
   // CPU
-  push_hist(hist.cpu, live.cpu.percent);
+  push(hist.cpu, live.cpu.percent);
   document.getElementById('cpu-live-rows').innerHTML =
-    info_row('Fréquence actuelle', live.cpu.freq_mhz ? live.cpu.freq_mhz + ' MHz' : '–') +
-    info_row('Fréquence max', live.cpu.freq_max_mhz ? live.cpu.freq_max_mhz + ' MHz' : '–');
-
+    info_row('Fréquence actuelle', live.cpu.freq_mhz ? live.cpu.freq_mhz+' MHz' : '–') +
+    info_row('Fréquence max', live.cpu.freq_max_mhz ? live.cpu.freq_max_mhz+' MHz' : '–');
   document.getElementById('cpu-meter-wrap').innerHTML = meter('Utilisation globale', live.cpu.percent);
 
-  if (cpuChart) {
-    cpuChart.data.datasets[0].data = [...hist.cpu, ...Array(HIST_LEN - hist.cpu.length).fill(null)].slice(-HIST_LEN);
-    cpuChart.update('none');
+  if (charts.cpu) {
+    charts.cpu.data.datasets[0].data = pad(hist.cpu);
+    charts.cpu.update('none');
   }
-
-  // cœurs
   const cores = live.cpu.percent_per_core || [];
-  document.getElementById('core-grid').innerHTML = cores.map((p, i) =>
-    `<div class="core-item"><div class="core-name">CPU ${i}</div><div class="core-val" style="color:${p>80?'var(--red)':p>50?'var(--yellow)':'var(--green)'}">${p.toFixed(1)}%</div><div class="meter-bar" style="margin-top:3px"><div class="meter-fill ${fill_color(p)}" style="width:${p}%"></div></div></div>`
+  document.getElementById('core-grid').innerHTML = cores.map((p,i) =>
+    `<div class="core-item"><div class="core-name">CPU ${i}</div>
+     <div class="core-val" style="color:${p>80?'var(--red)':p>50?'var(--yellow)':'var(--green)'}">${p.toFixed(1)}%</div>
+     <div class="meter-bar" style="margin-top:3px"><div class="meter-fill ${fill_cls(p)}" style="width:${p}%"></div></div></div>`
   ).join('');
 
   // RAM
   const m = live.memory;
-  push_hist(hist.mem, m.percent);
-  const cached = m.cached + m.buffers;
+  push(hist.mem, m.percent);
+  const cached = (m.cached||0) + (m.buffers||0);
   document.getElementById('ram-meters').innerHTML =
-    meter('Utilisée', m.percent, fmt_bytes(m.used) + ' / ' + fmt_bytes(m.total)) +
-    (cached > 0 ? `<div style="margin-top:6px">${meter('Cache + buffers', (cached/m.total*100), fmt_bytes(cached))}</div>` : '') +
-    (live.swap.total > 0 ? `<div style="margin-top:6px">${meter('Swap', live.swap.percent, fmt_bytes(live.swap.used) + ' / ' + fmt_bytes(live.swap.total))}</div>` : '');
-
-  if (window._memChart) {
-    window._memChart.data.datasets[0].data = [...hist.mem, ...Array(HIST_LEN - hist.mem.length).fill(null)].slice(-HIST_LEN);
-    window._memChart.update('none');
+    meter('Utilisée', m.percent, fmt_bytes(m.used)+' / '+fmt_bytes(m.total)) +
+    (cached > 0 ? meter('Cache + buffers', cached/m.total*100, fmt_bytes(cached)) : '') +
+    (live.swap.total > 0 ? meter('Swap', live.swap.percent, fmt_bytes(live.swap.used)+' / '+fmt_bytes(live.swap.total)) : '');
+  if (charts.mem) {
+    charts.mem.data.datasets[0].data = pad(hist.mem);
+    charts.mem.update('none');
   }
 
   // Réseau
-  push_hist(hist.net_dl, live.network.dl_bps);
-  push_hist(hist.net_ul, live.network.ul_bps);
+  push(hist.net_dl, live.network.dl_bps);
+  push(hist.net_ul, live.network.ul_bps);
   document.getElementById('net-dl').textContent = fmt_bps(live.network.dl_bps);
   document.getElementById('net-ul').textContent = fmt_bps(live.network.ul_bps);
-  document.getElementById('net-dl-tot').textContent = 'Total reçu : ' + fmt_bytes(live.network.total_recv);
-  document.getElementById('net-ul-tot').textContent = 'Total envoyé : ' + fmt_bytes(live.network.total_sent);
-
+  document.getElementById('net-dl-tot').textContent = 'Total : ' + fmt_bytes(live.network.total_recv);
+  document.getElementById('net-ul-tot').textContent = 'Total : ' + fmt_bytes(live.network.total_sent);
   const ifaces = live.network.interfaces || {};
-  document.getElementById('net-ifaces').innerHTML = Object.entries(ifaces).map(([iface, ip]) =>
-    `<span style="margin-right:16px;font-size:12px;color:var(--muted)"><code style="color:var(--accent)">${iface}</code> ${ip}</span>`
-  ).join('');
-
-  if (window._netChart) {
-    const pad = (arr) => [...Array(HIST_LEN - arr.length).fill(null), ...arr].slice(-HIST_LEN);
-    window._netChart.data.datasets[0].data = pad(hist.net_dl);
-    window._netChart.data.datasets[1].data = pad(hist.net_ul);
-    const maxVal = Math.max(...hist.net_dl, ...hist.net_ul, 1024);
-    window._netChart.options.scales.y.max = maxVal * 1.2;
-    window._netChart.update('none');
+  document.getElementById('net-ifaces').innerHTML = Object.entries(ifaces).map(([iface, inf]) => {
+    const up = typeof inf === 'object' ? inf.up : true;
+    const ip = typeof inf === 'object' ? inf.ip : inf;
+    return `<div class="iface-chip"><span class="iface-dot" style="background:${up?'var(--green)':'var(--red)'}"></span><code style="color:var(--accent)">${iface}</code> <span style="color:var(--muted)">${ip}</span></div>`;
+  }).join('');
+  if (charts.net) {
+    charts.net.data.datasets[0].data = pad(hist.net_dl);
+    charts.net.data.datasets[1].data = pad(hist.net_ul);
+    const mx = Math.max(...hist.net_dl, ...hist.net_ul, 1024);
+    charts.net.options.scales.y.max = mx * 1.2;
+    charts.net.update('none');
   }
 
   // Disques
   const diskEl = document.getElementById('disk-meters');
   if (diskEl) {
-    diskEl.innerHTML = live.disks.map(d =>
-      `<div style="margin-bottom:10px">${meter(d.mountpoint + ' <span style="color:var(--muted);font-size:11px">('+d.device+' · '+d.fstype+')</span>', d.percent, fmt_bytes(d.used) + ' / ' + fmt_bytes(d.total) + ' — ' + fmt_bytes(d.free) + ' libres')}</div>`
-    ).join('') || '<span style="color:var(--muted)">Aucune partition détectée</span>';
+    diskEl.innerHTML = live.disks.map(d => {
+      const name = d.label ? `${d.mountpoint} <span style="color:var(--muted);font-size:11px">${d.label} · ${d.device}</span>`
+                           : `${d.mountpoint} <span style="color:var(--muted);font-size:11px">${d.device} · ${d.fstype}</span>`;
+      return `<div style="margin-bottom:8px">${meter(name, d.percent, fmt_bytes(d.used)+'/'+fmt_bytes(d.total)+' — '+fmt_bytes(d.free)+' libres')}</div>`;
+    }).join('') || '<span style="color:var(--muted)">Aucune partition</span>';
   }
 
   // Températures
   const tempEl = document.getElementById('temp-table');
   if (tempEl) {
-    const temps = live.temperatures || {};
-    const rows = Object.values(temps).flat();
-    if (rows.length) {
-      tempEl.innerHTML = `<table><thead><tr><th>Capteur</th><th>Température</th><th>Max</th><th>Critique</th></tr></thead><tbody>` +
+    const rows = Object.values(live.temperatures||{}).flat();
+    tempEl.innerHTML = rows.length
+      ? `<table><thead><tr><th>Capteur</th><th>Temp.</th><th>Max</th><th>Critique</th></tr></thead><tbody>` +
         rows.map(r => {
           const c = r.current;
-          const color = c > (r.critical || 90) ? 'var(--red)' : c > (r.high || 75) ? 'var(--yellow)' : 'var(--green)';
-          return `<tr><td>${r.label}</td><td style="color:${color};font-weight:700">${c?.toFixed(1)} °C</td><td>${r.high ? r.high+'°C' : '–'}</td><td>${r.critical ? r.critical+'°C' : '–'}</td></tr>`;
-        }).join('') + `</tbody></table>`;
-    } else {
-      tempEl.innerHTML = '<span style="color:var(--muted)">Aucun capteur de température disponible</span>';
-    }
+          const col = c > (r.critical||90) ? 'var(--red)' : c > (r.high||75) ? 'var(--yellow)' : 'var(--green)';
+          return `<tr><td>${r.label}</td><td style="color:${col};font-weight:700">${c?.toFixed(1)} °C</td><td>${r.high?r.high+'°C':'–'}</td><td>${r.critical?r.critical+'°C':'–'}</td></tr>`;
+        }).join('') + `</tbody></table>`
+      : '<span style="color:var(--muted)">Aucun capteur disponible</span>';
   }
 
-  // blink refresh dot
+  // blink
   const dot = document.getElementById('refresh-dot');
   dot.style.background = 'var(--accent)';
-  setTimeout(() => { dot.style.background = 'var(--green)'; }, 300);
+  setTimeout(() => { dot.style.background = 'var(--green)'; }, 250);
 }
 
-async function load_hw_and_os() {
-  const [os, hw] = await Promise.all([
-    fetch('/api/os').then(r => r.json()),
-    fetch('/api/hardware').then(r => r.json()),
+// ──────────────────────────────── init ──
+async function init() {
+  const [os, hw, raid] = await Promise.all([
+    fetch('/api/os').then(r=>r.json()),
+    fetch('/api/hardware').then(r=>r.json()),
+    fetch('/api/raid').then(r=>r.json()),
   ]);
-  document.getElementById('hostname').textContent = '🖥️ ' + os.hostname;
-  document.getElementById('os-line').textContent = os.os + ' · ' + os.kernel + ' · ' + os.arch;
-  build_ui(os, hw);
-  hwLoaded = true;
+  build_ui(os, hw, raid);
+  const live = await fetch('/api/live').then(r=>r.json());
+  update_live(live);
+  setInterval(async () => {
+    try {
+      const live = await fetch('/api/live').then(r=>r.json());
+      update_live(live);
+    } catch {
+      document.getElementById('refresh-dot').style.background = 'var(--red)';
+    }
+  }, 5000);
 }
 
-async function poll() {
-  try {
-    const live = await fetch('/api/live').then(r => r.json());
-    if (!hwLoaded) return;
-    update_live(live);
-  } catch(e) {
-    document.getElementById('refresh-dot').style.background = 'var(--red)';
-  }
-}
-
-load_hw_and_os().then(() => {
-  poll();
-  setInterval(poll, 5000);
-});
+init();
 </script>
 </body>
 </html>
