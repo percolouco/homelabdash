@@ -116,60 +116,83 @@ def _host_path(p: str) -> str:
     return HOST_ROOT + p if HOST_ROOT else p
 
 
-def _read_host_mounts() -> list[dict]:
-    """Lit /proc/mounts depuis le système hôte (via HOST_ROOT/proc/mounts)."""
-    mounts_file = _host_path("/proc/mounts")
-    parts = []
+def _flatten_lsblk(dev: dict, result: list | None = None) -> list:
+    if result is None:
+        result = []
+    result.append(dev)
+    for child in dev.get("children", []):
+        _flatten_lsblk(child, result)
+    return result
+
+
+def _read_host_disks() -> list[dict]:
+    """Enumère les vrais disques via lsblk (lit /sys) et accède aux montages via /rootfs."""
     try:
-        with open(mounts_file) as f:
-            for line in f:
-                cols = line.split()
-                if len(cols) < 3:
+        raw = _run(["lsblk", "-J", "-b", "-o",
+                    "NAME,SIZE,TYPE,MOUNTPOINT,MOUNTPOINTS,FSTYPE,LABEL"])
+        data = json.loads(raw)
+    except Exception:
+        return []
+
+    result = []
+    seen_mp: set = set()
+
+    for dev in data.get("blockdevices", []):
+        for item in _flatten_lsblk(dev):
+            if item.get("type") not in ("part", "lvm", "disk", "raid1", "md"):
+                if item.get("type") == "disk" and not item.get("children"):
+                    pass  # disque sans partition (rare, garder)
+                elif item.get("type") != "disk":
+                    pass
+                # on garde tout sauf loop/rom/etc
+                if item.get("type") in ("loop", "rom", "sr"):
                     continue
-                device, mountpoint, fstype = cols[0], cols[1], cols[2]
-                if fstype in SKIP_FS:
-                    continue
-                if not device.startswith("/dev/"):
-                    continue
-                # accéder au point de montage via le chemin hôte
-                real_path = _host_path(mountpoint)
-                try:
-                    u = psutil.disk_usage(real_path)
-                    if u.total == 0:
+
+            mps = item.get("mountpoints") or []
+            mp = item.get("mountpoint")
+            if mp and mp not in mps:
+                mps.insert(0, mp)
+            mps = [m for m in mps if m and m not in ("[SWAP]", "")]
+
+            fstype = item.get("fstype") or ""
+            if fstype in SKIP_FS:
+                continue
+
+            for mountpoint in mps:
+                # ne garder que les montages hôtes (commencent par HOST_ROOT si défini)
+                if HOST_ROOT:
+                    if not mountpoint.startswith(HOST_ROOT + "/") and mountpoint != HOST_ROOT:
                         continue
-                    parts.append({
-                        "device": device,
-                        "mountpoint": mountpoint,
+                    display_mp = mountpoint[len(HOST_ROOT):] or "/"
+                    real_path = mountpoint
+                else:
+                    display_mp = mountpoint
+                    real_path = mountpoint
+
+                if display_mp in seen_mp:
+                    continue
+                try:
+                    st = os.statvfs(real_path)
+                    total = st.f_blocks * st.f_frsize
+                    if total == 0:
+                        continue
+                    free = st.f_bavail * st.f_frsize
+                    used = total - st.f_bfree * st.f_frsize
+                    pct = round(used / total * 100, 1) if total else 0
+                    seen_mp.add(display_mp)
+                    result.append({
+                        "device": "/dev/" + item["name"],
+                        "mountpoint": display_mp,
                         "fstype": fstype,
-                        "total": u.total,
-                        "used": u.used,
-                        "free": u.free,
-                        "percent": u.percent,
+                        "label": item.get("label") or "",
+                        "total": total,
+                        "used": used,
+                        "free": free,
+                        "percent": pct,
                     })
                 except Exception:
                     continue
-    except Exception:
-        # fallback : partitions vues par le container
-        for p in psutil.disk_partitions(all=False):
-            if p.fstype in SKIP_FS:
-                continue
-            try:
-                u = psutil.disk_usage(p.mountpoint)
-                parts.append({
-                    "device": p.device, "mountpoint": p.mountpoint,
-                    "fstype": p.fstype,
-                    "total": u.total, "used": u.used, "free": u.free, "percent": u.percent,
-                })
-            except Exception:
-                pass
-    # dédupliquer par device+mountpoint
-    seen = set()
-    result = []
-    for p in parts:
-        key = (p["device"], p["mountpoint"])
-        if key not in seen:
-            seen.add(key)
-            result.append(p)
+
     return result
 
 
@@ -181,7 +204,7 @@ def get_live() -> dict:
     mem = psutil.virtual_memory()
     swap = psutil.swap_memory()
 
-    disks = _read_host_mounts()
+    disks = _read_host_disks()
 
     # réseau — avec network_mode:host on lit directement les stats hôte
     net_now = psutil.net_io_counters()
