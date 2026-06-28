@@ -423,6 +423,7 @@ def _netmap_save(data: dict):
 def _netmap_parse(output: str) -> list[dict]:
     hosts = []
     current: dict = {}
+    in_script = False
     for line in output.splitlines():
         m_host = re.search(r"Nmap scan report for (.+)", line)
         if m_host:
@@ -431,25 +432,35 @@ def _netmap_parse(output: str) -> list[dict]:
             raw = m_host.group(1)
             ip_m = re.search(r"\((\d+\.\d+\.\d+\.\d+)\)", raw)
             if ip_m:
-                current = {"ip": ip_m.group(1), "hostname": raw.split("(")[0].strip(), "mac": "", "vendor": ""}
+                current = {"ip": ip_m.group(1), "hostname": raw.split("(")[0].strip(), "mac": "", "vendor": "", "netbios": ""}
             else:
-                current = {"ip": raw.strip(), "hostname": "", "mac": "", "vendor": ""}
+                current = {"ip": raw.strip(), "hostname": "", "mac": "", "vendor": "", "netbios": ""}
+            in_script = False
             continue
         m_mac = re.search(r"MAC Address: ([0-9A-F:]+)\s*(?:\((.+)\))?", line, re.I)
         if m_mac:
             current["mac"] = m_mac.group(1)
             current["vendor"] = m_mac.group(2) or ""
+            continue
+        # Résultat du script nbstat
+        m_nb = re.search(r"NetBIOS name: ([^,]+)", line, re.I)
+        if m_nb:
+            nb = m_nb.group(1).strip()
+            if nb and nb.lower() not in ("<unknown>", ""):
+                current["netbios"] = nb
     if current.get("ip"):
         hosts.append(current)
     return hosts
+
 
 
 @app.get("/api/netmap/scan")
 def api_netmap_scan():
     try:
         r = subprocess.run(
-            ["nmap", "-sn", "-T4", "--host-timeout", "2s", NETMAP_RANGE],
-            capture_output=True, text=True, timeout=120
+            ["nmap", "-sn", "-T4", "-R", "--dns-servers", "192.168.1.1",
+             "--host-timeout", "3s", "--script", "nbstat", NETMAP_RANGE],
+            capture_output=True, text=True, timeout=180
         )
         hosts = _netmap_parse(r.stdout)
         return {"hosts": hosts, "names": _netmap_load()}

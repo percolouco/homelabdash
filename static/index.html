@@ -537,21 +537,28 @@ function netmapRender(hosts) {
   if (!hosts.length) { el.innerHTML = '<span style="color:var(--muted)">Aucun appareil détecté.</span>'; return; }
   const rows = hosts.map(h => {
     const k = h.ip.replace(/\./g, '_');
-    const name = _netmapNames[h.ip] || '';
+    // Meilleur nom détecté : NetBIOS > hostname DNS > fabricant
+    const detected = h.netbios || h.hostname || '';
+    const savedName = _netmapNames[h.ip] || '';
+    // Pré-remplir le champ avec le nom détecté si pas encore de nom sauvegardé
+    const inputVal = savedName || detected;
+    const detectedBadge = detected
+      ? `<span style="font-size:10px;color:var(--muted);margin-left:4px" title="${h.netbios ? 'NetBIOS' : 'DNS'}">${h.netbios ? '🔵' : '🔤'} ${detected}</span>`
+      : '';
     return `<tr>
       <td><code style="color:var(--accent)">${h.ip}</code></td>
       <td><code style="color:var(--muted);font-size:12px">${h.mac || '—'}</code></td>
       <td style="color:var(--muted);font-size:12px">${h.vendor || '—'}</td>
-      <td style="color:var(--muted);font-size:12px">${h.hostname || '—'}</td>
+      <td style="font-size:12px">${detectedBadge || '<span style="color:var(--muted)">—</span>'}</td>
       <td>
-        <input class="netmap-name-input" id="nm_${k}" value="${h.ip in _netmapNames ? _netmapNames[h.ip].replace(/"/g,'&quot;') : ''}" placeholder="Nom perso…">
+        <input class="netmap-name-input" id="nm_${k}" value="${inputVal.replace(/"/g,'&quot;').replace(/</g,'&lt;')}" placeholder="Nom perso…">
         <button class="netmap-save-btn" onclick="netmapSaveName('${h.ip}')">Sauver</button>
         <span class="netmap-flash" id="nmf_${k}"></span>
       </td>
     </tr>`;
   }).join('');
   el.innerHTML = `<table>
-    <thead><tr><th>IP</th><th>MAC</th><th>Fabricant</th><th>Hostname</th><th>Nom perso</th></tr></thead>
+    <thead><tr><th>IP</th><th>MAC</th><th>Fabricant</th><th>Nom détecté</th><th>Nom perso</th></tr></thead>
     <tbody>${rows}</tbody>
   </table>`;
 }
