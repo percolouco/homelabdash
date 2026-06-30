@@ -103,6 +103,15 @@
   .s-size { font-size: 18px; font-weight: 800; color: var(--accent); }
   .s-info { font-size: 11px; color: var(--muted); }
 
+  /* NETCONN */
+  .nc-table td { padding: 6px 8px; font-size: 12px; }
+  .nc-ip { font-family: monospace; color: var(--accent); font-weight: 700; font-size: 13px; }
+  .nc-bps { font-weight: 700; }
+  .nc-dl { color: var(--teal); }
+  .nc-ul { color: var(--orange); }
+  .nc-chips { display: flex; flex-wrap: wrap; gap: 4px; }
+  .nc-chip { background: #21262d; border-radius: 4px; padding: 2px 7px; font-size: 11px; color: var(--muted); font-family: monospace; }
+
   /* NETMAP */
   .netmap-toolbar { display: flex; gap: 10px; align-items: center; margin-bottom: 8px; }
   .netmap-btn { background: var(--accent); color: #0d1117; border: none; border-radius: 6px; padding: 6px 16px; font-size: 12px; font-weight: 700; cursor: pointer; transition: opacity .15s; }
@@ -380,6 +389,11 @@ function build_ui(os, hw, raid) {
     '<div id="temp-table"></div>'
   ));
 
+  // NetConn
+  grid.appendChild(make_card('card-netconn','col-12','🔌','Trafic réseau par appareil — live',
+    '<div id="netconn-body"><span style="color:var(--muted)">Chargement…</span></div>'
+  ));
+
   // NetMap
   grid.appendChild(make_card('card-netmap','col-12','📡','Appareils réseau — 192.168.1.10–150',
     `<div class="netmap-toolbar">
@@ -503,6 +517,46 @@ function update_live(live) {
   setTimeout(() => { dot.style.background = 'var(--green)'; }, 250);
 }
 
+// ──────────────────────────────── netconn ──
+let _ncNames = {};
+
+async function ncRefresh() {
+  try {
+    const data = await fetch('/api/netconn').then(r => r.json());
+    ncRender(data.hosts || []);
+  } catch { /* silencieux */ }
+}
+
+function ncRender(hosts) {
+  const el = document.getElementById('netconn-body');
+  if (!el) return;
+  if (!hosts.length) { el.innerHTML = '<span style="color:var(--muted)">Aucune connexion LAN active</span>'; return; }
+  const rows = hosts.map(h => {
+    const name = _ncNames[h.ip] || '';
+    const dlBps = fmt_bps(h.dl_bps || 0);
+    const ulBps = fmt_bps(h.ul_bps || 0);
+    const chips = (h.top || []).map(c => {
+      const label = c.service ? `${c.service}:${c.port}` : c.port;
+      return `<span class="nc-chip" title="${c.remote}">${label}</span>`;
+    }).join('');
+    const active = h.dl_bps > 1024 || h.ul_bps > 1024;
+    return `<tr${active ? ' style="background:#1a2020"' : ''}>
+      <td class="nc-ip">${h.ip}${name ? ` <span style="color:var(--muted);font-size:11px">${name}</span>` : ''}</td>
+      <td style="text-align:center;color:var(--muted)">${h.established}</td>
+      <td class="nc-bps nc-dl">${dlBps}</td>
+      <td class="nc-bps nc-ul">${ulBps}</td>
+      <td><div class="nc-chips">${chips || '<span style="color:var(--muted);font-size:11px">—</span>'}</div></td>
+    </tr>`;
+  }).join('');
+  el.innerHTML = `<table class="nc-table">
+    <thead><tr>
+      <th>Appareil</th><th style="text-align:center">Connexions</th>
+      <th>⬇ Download</th><th>⬆ Upload</th><th>Services actifs</th>
+    </tr></thead>
+    <tbody>${rows}</tbody>
+  </table>`;
+}
+
 // ──────────────────────────────── netmap ──
 let _netmapNames = {};
 
@@ -592,10 +646,17 @@ async function init() {
   build_ui(os, hw, raid);
   const live = await fetch('/api/live').then(r=>r.json());
   update_live(live);
+  // Charger les noms netmap pour les labels d'appareils dans netconn
+  fetch('/api/netmap/names').then(r => r.json()).then(d => { _ncNames = d; });
+
+  // Premier chargement netconn
+  ncRefresh();
+
   setInterval(async () => {
     try {
       const live = await fetch('/api/live').then(r=>r.json());
       update_live(live);
+      ncRefresh();
     } catch {
       document.getElementById('refresh-dot').style.background = 'var(--red)';
     }

@@ -488,4 +488,145 @@ def api_netmap_name(payload: dict = Body(...)):
     return {"ok": True}
 
 
+# ─────────────────────────────────────────────────────── NETCONN ──
+
+_CONNTRACK = "/proc/net/nf_conntrack"
+_CONNTRACK_ACCT = "/proc/sys/net/netfilter/nf_conntrack_acct"
+_conn_prev: dict = {}   # key=conn_id → {"b_fwd": int, "b_rev": int, "ts": float}
+
+# Activer le comptage de bytes à l'initialisation
+try:
+    with open(_CONNTRACK_ACCT, "w") as _f:
+        _f.write("1")
+except Exception:
+    pass
+
+_LOCAL_NETS = re.compile(r"^(192\.168\.\d+\.\d+|10\.\d+\.\d+\.\d+|172\.(1[6-9]|2\d|3[01])\.\d+\.\d+)$")
+_LAN = re.compile(r"^192\.168\.1\.\d+$")
+
+_PORT_NAMES = {
+    80: "http", 443: "https", 22: "ssh", 21: "ftp", 53: "dns",
+    3306: "mysql", 5432: "pg", 6379: "redis", 1883: "mqtt",
+    32400: "plex", 8096: "jellyfin", 8123: "ha", 3500: "gitea",
+    8000: "homelabdash", 9300: "percohub",
+}
+
+
+def _parse_conntrack() -> list[dict]:
+    try:
+        with open(_CONNTRACK) as f:
+            lines = f.readlines()
+    except Exception:
+        return []
+
+    conns = []
+    for line in lines:
+        parts = line.split()
+        proto = parts[2] if len(parts) > 2 else ""
+        state = ""
+        for p in parts:
+            if p in ("ESTABLISHED", "TIME_WAIT", "CLOSE_WAIT", "SYN_SENT", "CLOSE"):
+                state = p
+                break
+
+        kv = {}
+        seen_src = seen_dst = False
+        for p in parts:
+            if "=" not in p:
+                continue
+            k, v = p.split("=", 1)
+            if k == "src":
+                kv["src2" if seen_src else "src"] = v
+                seen_src = True
+            elif k == "dst":
+                kv["dst2" if seen_dst else "dst"] = v
+                seen_dst = True
+            elif k in ("sport", "dport", "bytes", "packets"):
+                if k not in kv:
+                    kv[k] = int(v)
+                else:
+                    kv[k + "2"] = int(v)
+
+        src, dst = kv.get("src", ""), kv.get("dst", "")
+        sport, dport = kv.get("sport", 0), kv.get("dport", 0)
+        b_fwd = kv.get("bytes", 0)
+        b_rev = kv.get("bytes2", 0)
+
+        # Déterminer le sens : LAN→ext ou ext→LAN
+        src_lan = bool(_LAN.match(src))
+        dst_lan = bool(_LAN.match(dst))
+        src2_lan = bool(_LAN.match(kv.get("src2", "")))
+
+        if src_lan and not dst_lan:
+            local_ip, remote_ip, local_port, remote_port = src, dst, sport, dport
+            dl, ul = b_rev, b_fwd
+        elif dst_lan and not src_lan:
+            local_ip, remote_ip, local_port, remote_port = dst, src, dport, sport
+            dl, ul = b_fwd, b_rev
+        elif src_lan and dst_lan:
+            local_ip, remote_ip, local_port, remote_port = src, dst, sport, dport
+            dl, ul = b_rev, b_fwd
+        else:
+            continue
+
+        conns.append({
+            "local_ip": local_ip,
+            "remote_ip": remote_ip,
+            "local_port": local_port,
+            "remote_port": remote_port,
+            "proto": proto,
+            "state": state,
+            "dl_bytes": dl,
+            "ul_bytes": ul,
+            "service": _PORT_NAMES.get(remote_port, _PORT_NAMES.get(local_port, "")),
+        })
+    return conns
+
+
+@app.get("/api/netconn")
+def api_netconn():
+    global _conn_prev
+    now = time.time()
+    conns = _parse_conntrack()
+
+    # Regrouper par IP locale
+    by_ip: dict = {}
+    for c in conns:
+        ip = c["local_ip"]
+        if ip not in by_ip:
+            by_ip[ip] = {"ip": ip, "conns": 0, "established": 0,
+                         "dl_bytes": 0, "ul_bytes": 0, "top": []}
+        entry = by_ip[ip]
+        entry["conns"] += 1
+        if c["state"] == "ESTABLISHED":
+            entry["established"] += 1
+        entry["dl_bytes"] += c["dl_bytes"]
+        entry["ul_bytes"] += c["ul_bytes"]
+        if c["state"] == "ESTABLISHED" and len(entry["top"]) < 5:
+            entry["top"].append({
+                "remote": c["remote_ip"],
+                "port": c["remote_port"],
+                "service": c["service"],
+                "proto": c["proto"],
+            })
+
+    # Calcul du débit (delta vs snapshot précédent)
+    dt = now - _conn_prev.get("_ts", now - 1)
+    dt = max(dt, 0.5)
+    result = []
+    for ip, d in sorted(by_ip.items(), key=lambda x: x[1]["dl_bytes"] + x[1]["ul_bytes"], reverse=True):
+        prev = _conn_prev.get(ip, {})
+        dl_prev = prev.get("dl_bytes", d["dl_bytes"])
+        ul_prev = prev.get("ul_bytes", d["ul_bytes"])
+        dl_bps = max(0, (d["dl_bytes"] - dl_prev) / dt)
+        ul_bps = max(0, (d["ul_bytes"] - ul_prev) / dt)
+        result.append({**d, "dl_bps": dl_bps, "ul_bps": ul_bps})
+
+    # Sauvegarder le snapshot
+    _conn_prev = {ip: {"dl_bytes": d["dl_bytes"], "ul_bytes": d["ul_bytes"]} for ip, d in by_ip.items()}
+    _conn_prev["_ts"] = now
+
+    return {"hosts": result, "ts": int(now)}
+
+
 app.mount("/", StaticFiles(directory="/app/static", html=True), name="static")
