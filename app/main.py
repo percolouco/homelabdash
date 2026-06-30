@@ -10,6 +10,7 @@ app = FastAPI()
 
 HOST_ROOT = os.environ.get("HOST_ROOT", "")
 _net_last = {"t": 0.0, "bytes_sent": 0, "bytes_recv": 0}
+_PHYS_IFACE = re.compile(r"^(eth|en[ps]|wlan|wlp|bond|ens)\d")
 _hw_cache: dict = {}
 _hw_cache_ts = 0.0
 HW_TTL = 60.0
@@ -296,18 +297,22 @@ def get_live() -> dict:
     swap = psutil.swap_memory()
     disks = _read_host_disks()
 
-    net_now = psutil.net_io_counters()
+    # Trafic réseau : ne sommer que les interfaces physiques (exclut br-, veth, docker0…)
+    per_nic = psutil.net_io_counters(pernic=True)
+    phys = {k: v for k, v in per_nic.items() if _PHYS_IFACE.match(k)}
+    recv_total = sum(v.bytes_recv for v in phys.values())
+    sent_total = sum(v.bytes_sent for v in phys.values())
     now = time.time()
     dt = now - _net_last["t"] if _net_last["t"] else 1.0
-    dl = (net_now.bytes_recv - _net_last["bytes_recv"]) / dt if _net_last["t"] else 0
-    ul = (net_now.bytes_sent - _net_last["bytes_sent"]) / dt if _net_last["t"] else 0
-    _net_last = {"t": now, "bytes_sent": net_now.bytes_sent, "bytes_recv": net_now.bytes_recv}
+    dl = (recv_total - _net_last["bytes_recv"]) / dt if _net_last["t"] else 0
+    ul = (sent_total - _net_last["bytes_sent"]) / dt if _net_last["t"] else 0
+    _net_last = {"t": now, "bytes_sent": sent_total, "bytes_recv": recv_total}
 
-    # Interfaces : filtrer loopback et bridges Docker
+    # Interfaces physiques uniquement pour l'affichage
     net_ifaces = {}
     stats = psutil.net_if_stats()
     for iface, addrs in psutil.net_if_addrs().items():
-        if iface == "lo" or iface.startswith("br-") or iface == "docker0":
+        if not _PHYS_IFACE.match(iface):
             continue
         for a in addrs:
             if a.family == 2:
@@ -349,8 +354,8 @@ def get_live() -> dict:
         "network": {
             "dl_bps": max(0.0, dl),
             "ul_bps": max(0.0, ul),
-            "total_recv": net_now.bytes_recv,
-            "total_sent": net_now.bytes_sent,
+            "total_recv": recv_total,
+            "total_sent": sent_total,
             "interfaces": net_ifaces,
         },
         "temperatures": temps,
