@@ -702,8 +702,10 @@ def api_dockernet():
             continue
 
         prev = _dockernet_prev.get(bid, {})
-        dl_bps = max(0, (stats.bytes_recv - prev.get("recv", stats.bytes_recv)) / dt)
-        ul_bps = max(0, (stats.bytes_sent - prev.get("sent", stats.bytes_sent)) / dt)
+        # Sur un bridge Docker : bytes_sent = vers les conteneurs = leur DL
+        #                        bytes_recv = depuis les conteneurs = leur UL
+        dl_bps = max(0, (stats.bytes_sent - prev.get("sent", stats.bytes_sent)) / dt)
+        ul_bps = max(0, (stats.bytes_recv - prev.get("recv", stats.bytes_recv)) / dt)
 
         _dockernet_prev[bid] = {"recv": stats.bytes_recv, "sent": stats.bytes_sent}
 
