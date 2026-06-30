@@ -103,6 +103,11 @@
   .s-size { font-size: 18px; font-weight: 800; color: var(--accent); }
   .s-info { font-size: 11px; color: var(--muted); }
 
+  /* DOCKERNET */
+  .dn-net { font-weight: 700; color: var(--accent); }
+  .dn-containers { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 2px; }
+  .dn-container { background: #21262d; border-radius: 4px; padding: 1px 7px; font-size: 11px; color: var(--muted); }
+
   /* NETCONN */
   .nc-table td { padding: 6px 8px; font-size: 12px; }
   .nc-ip { font-family: monospace; color: var(--accent); font-weight: 700; font-size: 13px; }
@@ -389,8 +394,13 @@ function build_ui(os, hw, raid) {
     '<div id="temp-table"></div>'
   ));
 
+  // DockerNet
+  grid.appendChild(make_card('card-dockernet','col-12','🐳','Trafic par réseau Docker — live',
+    '<div id="dockernet-body"><span style="color:var(--muted)">Chargement…</span></div>'
+  ));
+
   // NetConn
-  grid.appendChild(make_card('card-netconn','col-12','🔌','Trafic réseau par appareil — live',
+  grid.appendChild(make_card('card-netconn','col-12','🔌','Trafic réseau par appareil LAN — live',
     '<div id="netconn-body"><span style="color:var(--muted)">Chargement…</span></div>'
   ));
 
@@ -515,6 +525,37 @@ function update_live(live) {
   const dot = document.getElementById('refresh-dot');
   dot.style.background = 'var(--accent)';
   setTimeout(() => { dot.style.background = 'var(--green)'; }, 250);
+}
+
+// ──────────────────────────────── dockernet ──
+async function dnRefresh() {
+  try {
+    const data = await fetch('/api/dockernet').then(r => r.json());
+    dnRender(data.networks || []);
+  } catch { /* silencieux */ }
+}
+
+function dnRender(nets) {
+  const el = document.getElementById('dockernet-body');
+  if (!el) return;
+  const active = nets.filter(n => n.dl_bps > 100 || n.ul_bps > 100);
+  const rest = nets.filter(n => n.dl_bps <= 100 && n.ul_bps <= 100);
+  const renderRow = n => {
+    const busy = n.dl_bps > 1024 || n.ul_bps > 1024;
+    const chips = n.containers.slice(0,6).map(c =>
+      `<span class="dn-container">${c}</span>`).join('');
+    return `<tr${busy ? ' style="background:#1a1e2a"' : ''}>
+      <td class="dn-net">${n.name}</td>
+      <td class="nc-bps nc-dl">${fmt_bps(n.dl_bps)}</td>
+      <td class="nc-bps nc-ul">${fmt_bps(n.ul_bps)}</td>
+      <td><div class="dn-containers">${chips}</div></td>
+    </tr>`;
+  };
+  const rows = [...active, ...rest].map(renderRow).join('');
+  el.innerHTML = `<table class="nc-table">
+    <thead><tr><th>Réseau Docker</th><th>⬇ Download</th><th>⬆ Upload</th><th>Conteneurs</th></tr></thead>
+    <tbody>${rows}</tbody>
+  </table>`;
 }
 
 // ──────────────────────────────── netconn ──
@@ -649,13 +690,15 @@ async function init() {
   // Charger les noms netmap pour les labels d'appareils dans netconn
   fetch('/api/netmap/names').then(r => r.json()).then(d => { _ncNames = d; });
 
-  // Premier chargement netconn
+  // Premiers chargements
+  dnRefresh();
   ncRefresh();
 
   setInterval(async () => {
     try {
       const live = await fetch('/api/live').then(r=>r.json());
       update_live(live);
+      dnRefresh();
       ncRefresh();
     } catch {
       document.getElementById('refresh-dot').style.background = 'var(--red)';

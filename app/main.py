@@ -1,4 +1,4 @@
-import subprocess, json, time, re, os
+import subprocess, json, time, re, os, http.client, socket as _socket
 from typing import Optional
 
 import psutil
@@ -632,6 +632,93 @@ def api_netconn():
     _conn_prev["_ts"] = now
 
     return {"hosts": result, "ts": int(now)}
+
+
+# ─────────────────────────────────────────────────────── DOCKERNET ──
+
+_dockernet_prev: dict = {}   # bridge_id → {"recv": int, "sent": int, "ts": float}
+
+
+class _UnixHTTP(http.client.HTTPConnection):
+    def __init__(self, sock_path: str):
+        super().__init__("localhost")
+        self._sock_path = sock_path
+
+    def connect(self):
+        s = _socket.socket(_socket.AF_UNIX, _socket.SOCK_STREAM)
+        s.connect(self._sock_path)
+        self.sock = s
+
+
+def _docker_api(path: str) -> list | dict:
+    conn = _UnixHTTP("/var/run/docker.sock")
+    conn.request("GET", path)
+    r = conn.getresponse()
+    return json.loads(r.read())
+
+
+def _docker_net_map() -> dict:
+    """Retourne {bridge_short_id: {name, containers}} via API Docker socket."""
+    try:
+        nets = _docker_api("/networks?filters=%7B%22driver%22%3A%7B%22bridge%22%3Atrue%7D%7D")
+        net_by_id = {n["Id"][:12]: {"name": n["Name"], "containers": []} for n in nets}
+
+        # Remplir les containers via /containers/json
+        containers = _docker_api("/containers/json")
+        for c in containers:
+            name = c.get("Names", [""])[0].lstrip("/")
+            for net_name, net_cfg in c.get("NetworkSettings", {}).get("Networks", {}).items():
+                net_id = net_cfg.get("NetworkID", "")[:12]
+                if net_id in net_by_id:
+                    net_by_id[net_id]["containers"].append(name)
+
+        return net_by_id
+    except Exception:
+        return {}
+
+
+@app.get("/api/dockernet")
+def api_dockernet():
+    global _dockernet_prev
+    now = time.time()
+
+    net_map = _docker_net_map()
+    per_nic = psutil.net_io_counters(pernic=True)
+
+    # Ne garder que les bridges (br-XXXXXXXXXXXX)
+    bridge_re = re.compile(r"^br-([0-9a-f]{12})$")
+    result = []
+
+    dt = now - _dockernet_prev.get("_ts", now - 1)
+    dt = max(dt, 0.5)
+
+    for iface, stats in per_nic.items():
+        m = bridge_re.match(iface)
+        if not m:
+            continue
+        bid = m.group(1)
+        info = net_map.get(bid, {})
+        if not info:
+            continue
+
+        prev = _dockernet_prev.get(bid, {})
+        dl_bps = max(0, (stats.bytes_recv - prev.get("recv", stats.bytes_recv)) / dt)
+        ul_bps = max(0, (stats.bytes_sent - prev.get("sent", stats.bytes_sent)) / dt)
+
+        _dockernet_prev[bid] = {"recv": stats.bytes_recv, "sent": stats.bytes_sent}
+
+        result.append({
+            "bridge": iface,
+            "name": info["name"],
+            "containers": info["containers"],
+            "dl_bps": dl_bps,
+            "ul_bps": ul_bps,
+        })
+
+    _dockernet_prev["_ts"] = now
+    # Trier par trafic total décroissant
+    result.sort(key=lambda x: x["dl_bps"] + x["ul_bps"], reverse=True)
+    return {"networks": result, "ts": int(now)}
 
 
 app.mount("/", StaticFiles(directory="/app/static", html=True), name="static")

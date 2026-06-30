@@ -5,6 +5,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     dmidecode \
     lsb-release \
     nmap \
+    docker.io \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app

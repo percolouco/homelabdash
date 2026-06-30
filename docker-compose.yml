@@ -11,6 +11,7 @@ services:
       - /dev:/dev
       - /run/udev:/run/udev:ro
       - /home/perco/projects/homelabdash/netmap_devices.json:/app/netmap_devices.json
+      - /var/run/docker.sock:/var/run/docker.sock:ro
     environment:
       - HOST_ROOT=/rootfs
       - TZ=Europe/Paris
